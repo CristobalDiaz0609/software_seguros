@@ -51,6 +51,14 @@ st.markdown(
     .metric-value.red { color: #9b2c2c; }
     .metric-label { font-size: 10px; color: #718096; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
 
+    .section-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #2d3748;
+        margin-top: 10px;
+        margin-bottom: 10px;
+    }
+
     .edit-box {
         background-color: #f8fafc;
         border-left: 5px solid #2b6cb0;
@@ -81,7 +89,6 @@ st.markdown(
         color: #2c5282;
     }
 
-    /* Estilos Botones de Contacto Directo */
     .btn-contact {
         display: inline-flex;
         align-items: center;
@@ -127,10 +134,7 @@ st.markdown(
         box-shadow: 0 4px 12px rgba(47, 133, 90, 0.4) !important;
     }
     
-    /* Estilos para las Pestañas (Tabs) */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
-    }
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
         white-space: pre-wrap;
@@ -213,9 +217,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================================================
-# CREACIÓN DE LAS PESTAÑAS (HOJAS)
-# =========================================================
+# PESTAÑAS PRINCIPALES
 tab_main, tab_audit = st.tabs(["📊 Dashboard Principal", "🛠️ Limpieza y Auditoría de Datos"])
 
 # =========================================================
@@ -223,6 +225,7 @@ tab_main, tab_audit = st.tabs(["📊 Dashboard Principal", "🛠️ Limpieza y A
 # =========================================================
 with tab_main:
     
+    # 1. ACCIONES RÁPIDAS
     col_acc1, col_acc2 = st.columns([1, 1])
 
     with col_acc1:
@@ -465,16 +468,70 @@ with tab_main:
                     except Exception as err:
                         st.error(f"Error al guardar: {err}")
 
-    st.write("")
+    st.write("---")
 
-    # Buscador Principal
+    # 2. CÁLCULO DE KPIS GENERALES (INDIVIDUAL DE LA BASE COMPLETA)
+    total_clientes_gen = 0
+    total_polizas_gen = 0
+    total_comision_mes_actual = 0.0
+    total_comision_mes_anterior = 0.0
+    variacion_comision = 0.0
+
+    try:
+        conn = get_connection()
+
+        hoy = datetime.now()
+        primer_dia_mes_actual = hoy.replace(day=1).strftime("%Y-%m-%d")
+        ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
+        primer_dia_mes_anterior = ((hoy.replace(day=1) - timedelta(days=1)).replace(day=1)).strftime("%Y-%m-%d")
+
+        # Cómputos generales de la base entera
+        query_totales = "SELECT COUNT(DISTINCT id_cliente) as tot_cli, COUNT(id_poliza) as tot_pol FROM polizas;"
+        df_totales = pd.read_sql(query_totales, conn)
+        total_clientes_gen = int(df_totales["tot_cli"].iloc[0])
+        total_polizas_gen = int(df_totales["tot_pol"].iloc[0])
+
+        query_mes_actual = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');"
+        query_mes_anterior = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';"
+
+        df_actual = pd.read_sql(query_mes_actual, conn)
+        df_anterior = pd.read_sql(query_mes_anterior, conn)
+        conn.close()
+
+        total_comision_mes_actual = float(df_actual["total"].iloc[0])
+        total_comision_mes_anterior = float(df_anterior["total"].iloc[0])
+        variacion_comision = total_comision_mes_actual - total_comision_mes_anterior
+
+    except Exception:
+        pass
+
+    # TARJETAS DE KPIS GENERALES
+    st.markdown("<p class='section-title'>📊 Indicadores Generales de Negocio</p>", unsafe_allow_html=True)
+    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+    with col_m1:
+        st.markdown(f"""<div class="metric-card"><p class="metric-value">{total_clientes_gen}</p><p class="metric-label">CLIENTES TOTALES</p></div>""", unsafe_allow_html=True)
+    with col_m2:
+        st.markdown(f"""<div class="metric-card"><p class="metric-value" style="color:#2b6cb0;">{total_polizas_gen}</p><p class="metric-label">PÓLIZAS TOTALES</p></div>""", unsafe_allow_html=True)
+    with col_m3:
+        st.markdown(f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""", unsafe_allow_html=True)
+    with col_m4:
+        st.markdown(f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""", unsafe_allow_html=True)
+    with col_m5:
+        color_var = "green" if variacion_comision >= 0 else "red"
+        signo = "+" if variacion_comision >= 0 else ""
+        st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
+
+    st.write("---")
+
+    # 3. BÚSQUEDA Y GESTIÓN DE CLIENTES SEPARADA
+    st.markdown("<p class='section-title'>🔍 Búsqueda y Gestión de Cartera</p>", unsafe_allow_html=True)
+
     busqueda = st.text_input(
         "Buscador Oculto",
-        placeholder="🔍 Buscar por nombre, aseguradora o teléfono...",
+        placeholder="🔍 Buscar por nombre, aseguradora, teléfono o patente...",
         label_visibility="collapsed",
     )
 
-    # FILTROS
     filtro_seleccionado = st.pills(
         "Filtrar por estado",
         [
@@ -490,20 +547,10 @@ with tab_main:
 
     st.write("")
 
-    # CÁLCULOS Y CONSULTA
-    total_clientes = 0
-    total_polizas = 0
-    total_comision_mes_actual = 0.0
-    total_comision_mes_anterior = 0.0
-    variacion_comision = 0.0
-
+    # CONSULTA FILTRADA PARA LA LISTA
     try:
         conn = get_connection()
-
         hoy = datetime.now()
-        primer_dia_mes_actual = hoy.replace(day=1).strftime("%Y-%m-%d")
-        ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
-        primer_dia_mes_anterior = ((hoy.replace(day=1) - timedelta(days=1)).replace(day=1)).strftime("%Y-%m-%d")
 
         query_base = """
             SELECT 
@@ -545,45 +592,13 @@ with tab_main:
         query_base += " ORDER BY p.fecha_vencimiento ASC;"
 
         df = pd.read_sql(query_base, conn)
-
-        query_mes_actual = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');"
-        query_mes_anterior = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';"
-
-        df_actual = pd.read_sql(query_mes_actual, conn)
-        df_anterior = pd.read_sql(query_mes_anterior, conn)
         conn.close()
-
-        total_comision_mes_actual = float(df_actual["total"].iloc[0])
-        total_comision_mes_anterior = float(df_anterior["total"].iloc[0])
-        variacion_comision = total_comision_mes_actual - total_comision_mes_anterior
-
-        if not df.empty:
-            total_clientes = df["id_cliente"].nunique()
-            total_polizas = len(df)
-
-    except Exception as e:
+    except Exception:
         df = pd.DataFrame()
 
-    # TARJETAS MÉTRICAS (KPIs)
-    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-    with col_m1:
-        st.markdown(f"""<div class="metric-card"><p class="metric-value">{total_clientes}</p><p class="metric-label">CLIENTES</p></div>""", unsafe_allow_html=True)
-    with col_m2:
-        st.markdown(f"""<div class="metric-card"><p class="metric-value" style="color:#2b6cb0;">{total_polizas}</p><p class="metric-label">TOTAL PÓLIZAS</p></div>""", unsafe_allow_html=True)
-    with col_m3:
-        st.markdown(f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""", unsafe_allow_html=True)
-    with col_m4:
-        st.markdown(f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""", unsafe_allow_html=True)
-    with col_m5:
-        color_var = "green" if variacion_comision >= 0 else "red"
-        signo = "+" if variacion_comision >= 0 else ""
-        st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
-
-    st.write("")
-
-    # GRÁFICOS VISUALES
+    # GRÁFICOS VISUALES (OPCIONALES)
     if not df.empty:
-        with st.expander("📊 Ver Análisis Gráfico de Cartera", expanded=False):
+        with st.expander("📊 Ver Análisis Gráfico del Filtro Actual", expanded=False):
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 st.markdown("##### 🏢 Pólizas por Compañía Aseguradora")
@@ -616,6 +631,7 @@ with tab_main:
 
     # LISTADO DESPLEGABLE CON BOTONES
     if not df.empty:
+        st.caption(f"Mostrando **{len(df)} pólizas** que coinciden con el filtro de búsqueda.")
         for idx, row in df.iterrows():
             id_poliza = row["id_poliza"]
             id_cliente = row["id_cliente"]
@@ -722,7 +738,7 @@ with tab_main:
 # =========================================================
 with tab_audit:
     st.markdown("### 🛠️ Limpieza y Auditoría de Base de Datos")
-    st.write("En esta sección puedes ver todos los registros de tu base de datos global que tienen información incompleta (sin importar los filtros del panel principal). Haz doble clic en las celdas para corregirlos rápidamente.")
+    st.write("En esta sección puedes ver todos los registros de tu base de datos global que tienen información incompleta. Haz doble clic en las celdas para corregirlos rápidamente.")
     
     filtro_faltante = st.selectbox(
         "Selecciona el dato que quieres buscar y completar:",
@@ -767,7 +783,6 @@ with tab_audit:
             df_f = df_global_audit.copy()
             tipo_f = st.session_state['sb_faltante']
 
-            # Filtros Inteligentes
             if "Póliza" in tipo_f:
                 df_f = df_f[df_f['N_Poliza'].isin(['—', 'S/N', '', 'nan', 'None', '0', 'SIN POLIZA'])]
             elif "Fecha Vencimiento" in tipo_f:
@@ -814,14 +829,12 @@ with tab_audit:
                         cursor_sav = conn_sav.cursor()
 
                         for _, row in edited_df.iterrows():
-                            # Actualizar Cliente
                             cursor_sav.execute("""
                                 UPDATE clientes 
                                 SET nombre_completo = %s, rut = %s, telefono = %s, email = %s 
                                 WHERE id_cliente = %s;
                             """, (row['Nombre'], row['RUT'], row['Teléfono'], row['Email'], row['ID_Cliente']))
 
-                            # Obtener / Crear Compañía
                             comp_name = str(row['Aseguradora']).strip() or "GENERAL"
                             cursor_sav.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_name,))
                             r_c = cursor_sav.fetchone()
@@ -831,10 +844,8 @@ with tab_audit:
                                 cursor_sav.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_name,))
                                 id_co_act = cursor_sav.lastrowid
 
-                            # Formatear Fecha
                             f_venc = parse_custom_date(row['Fecha Vencimiento'])
 
-                            # Actualizar Póliza
                             cursor_sav.execute("""
                                 UPDATE polizas 
                                 SET numero_poliza = %s, id_compañia = %s, ramo = %s, materia_asegurada = %s, fecha_vencimiento = %s
@@ -854,5 +865,4 @@ with tab_audit:
             st.info("Tu base de datos está vacía. Importa un Excel primero.")
 
     except Exception as e_aud:
-        # Esto captura los errores de DNS / conexión para que no se caiga la app entera.
         st.error(f"⚠️ Error al conectarse a la Base de Datos para la Auditoría: Por favor, recarga la página. Detalle: {e_aud}")
