@@ -1,130 +1,179 @@
-import pandas as pd
 import mysql.connector
+import pandas as pd
 import streamlit as st
 
-# Configuración de la página
+# 1. Configuración de pantalla
 st.set_page_config(
-    page_title="Gestión de Seguros", page_icon="🛡️", layout="wide"
+    page_title="SegurosApp - Buscador Express",
+    page_icon="🔍",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 
-# Conexión a la base de datos en Aiven usando st.secrets
+# 2. Conexión a MySQL en Aiven
 def get_connection():
     return mysql.connector.connect(
         host=st.secrets["mysql"]["host"],
-        port=st.secrets["mysql"]["port"],
+        port=int(st.secrets["mysql"]["port"]),
         user=st.secrets["mysql"]["user"],
         password=st.secrets["mysql"]["password"],
         database=st.secrets["mysql"]["database"],
     )
 
 
-st.title("🛡️ Sistema de Gestión para Aseguradores")
-
-# Navegación lateral
+# Sidebar / Menú Lateral
+st.sidebar.title("🛡️ SegurosApp")
 menu = st.sidebar.radio(
-    "Navegación",
+    "Menú Principal",
     [
-        "Dashboard & Vencimientos",
-        "Cargar Excel (Importador)",
-        "Directorio de Clientes",
+        "⚡ Buscador Express",
+        "📊 Dashboard & Vencimientos",
+        "➕ Nuevo Cliente / Póliza",
+        "📥 Importador Excel",
     ],
 )
 
 # ---------------------------------------------------------
-# VISTA 1: DASHBOARD & VENCIMIENTOS
+# VISTA PRINCIPAL: BUSCADOR EXPRESS
 # ---------------------------------------------------------
-if menu == "Dashboard & Vencimientos":
-    st.header("📌 Resumen de Pólizas y Alertas")
-
-    try:
-        conn = get_connection()
-        # Traer pólizas próximas a vencer (próximos 30 días)
-        query_alertas = """
-            SELECT p.numero_poliza, c.nombre_completo AS cliente, p.ramo, p.fecha_vencimiento, p.monto_prima_anual
-            FROM polizas p
-            JOIN clientes c ON p.id_cliente = c.id_cliente
-            WHERE p.fecha_vencimiento BETWEEN CURRENT_DATE AND DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY)
-            ORDER BY p.fecha_vencimiento ASC;
-        """
-        df_vencimientos = pd.read_sql(query_alertas, conn)
-        conn.close()
-
-        col1, col2 = st.columns(2)
-        col1.metric("Pólizas por Vencer (30 días)", len(df_vencimientos))
-
-        st.subheader("⚠️ Alertador de Renovaciones Pendientes")
-        if not df_vencimientos.empty:
-            st.dataframe(df_vencimientos, use_container_width=True)
-        else:
-            st.info("No hay pólizas por vencer en los próximos 30 días.")
-
-    except Exception as e:
-        st.error(f"Error al conectar con la base de datos: {e}")
-
-# ---------------------------------------------------------
-# VISTA 2: IMPORTADOR DE EXCEL
-# ---------------------------------------------------------
-elif menu == "Cargar Excel (Importador)":
-    st.header("📥 Importar Planilla de Clientes/Pólizas")
-    st.write(
-        "Sube un archivo Excel (.xlsx) con las columnas: **RUT**, **Nombre**, **Email**, **Telefono**"
+if menu == "⚡ Buscador Express":
+    st.title("⚡ Buscador Universal de Clientes y Pólizas")
+    st.markdown(
+        "Ingresa cualquier dato para obtener la ficha completa de inmediato."
     )
 
-    uploaded_file = st.file_uploader(
-        "Selecciona tu planilla Excel", type=["xlsx", "xls"]
+    # Campo de búsqueda principal
+    busqueda = st.text_input(
+        "🔍 Buscar por RUT, Nombre, N° de Póliza o Patente/Materia:",
+        placeholder="Ej: 12345678-9, Juan Pérez, POL-9982, AB1234...",
     )
 
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file)
-        st.write("Vista previa de los datos a importar:")
-        st.dataframe(df.head())
+    if busqueda:
+        try:
+            conn = get_connection()
 
-        if st.button("Guardar en Base de Datos"):
-            try:
-                conn = get_connection()
-                cursor = conn.cursor()
-                registros_cargados = 0
+            # Query SQL universal que busca en múltiples campos con LIKE
+            query_busqueda = f"""
+                SELECT 
+                    c.id_cliente,
+                    c.rut,
+                    c.nombre_completo,
+                    c.email,
+                    c.telefono,
+                    c.direccion,
+                    p.id_poliza,
+                    p.numero_poliza,
+                    co.nombre AS compañia,
+                    p.ramo,
+                    p.materia_asegurada,
+                    p.fecha_inicio,
+                    p.fecha_vencimiento,
+                    p.monto_prima_anual,
+                    p.moneda,
+                    p.estado
+                FROM clientes c
+                LEFT JOIN polizas p ON c.id_cliente = p.id_cliente
+                LEFT JOIN compañias co ON p.id_compañia = co.id_compañia
+                WHERE c.rut LIKE '%{busqueda}%' 
+                   OR c.nombre_completo LIKE '%{busqueda}%'
+                   OR p.numero_poliza LIKE '%{busqueda}%'
+                   OR p.materia_asegurada LIKE '%{busqueda}%'
+                ORDER BY c.nombre_completo ASC, p.fecha_vencimiento DESC;
+            """
 
-                for _, row in df.iterrows():
-                    sql = """
-                        INSERT INTO clientes (rut, nombre_completo, email, telefono)
-                        VALUES (%s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE nombre_completo=VALUES(nombre_completo);
-                    """
-                    val = (
-                        str(row["RUT"]),
-                        str(row["Nombre"]),
-                        str(row.get("Email", "")),
-                        str(row.get("Telefono", "")),
-                    )
-                    cursor.execute(sql, val)
-                    registros_cargados += 1
+            df_resultados = pd.read_sql(query_busqueda, conn)
+            conn.close()
 
-                conn.commit()
-                cursor.close()
-                conn.close()
+            if not df_resultados.empty:
+                # Agrupar resultados por cliente único
+                clientes_unicos = df_resultados[
+                    "id_cliente"
+                ].unique()
 
                 st.success(
-                    f"¡Se importaron correctamente {registros_cargados} clientes a Aiven!"
+                    f"🎯 Se encontraron **{len(clientes_unicos)}** cliente(s) coincidentes:"
                 )
-            except Exception as e:
-                st.error(f"Error durante el guardado: {e}")
+
+                for id_cli in clientes_unicos:
+                    # Filtrar datos de este cliente específico
+                    df_cli = df_resultados[df_resultados["id_cliente"] == id_cli]
+                    cliente_info = df_cli.iloc[0]
+
+                    # Tarjeta visual del cliente (Ficha)
+                    with st.expander(
+                        f"👤 {cliente_info['nombre_completo']} — RUT: {cliente_info['rut']}",
+                        expanded=True,
+                    ):
+                        c1, c2, c3 = st.columns(3)
+                        c1.markdown(f"**Email:** {cliente_info['email'] or 'N/I'}")
+                        c2.markdown(f"**Teléfono:** {cliente_info['telefono'] or 'N/I'}")
+                        c3.markdown(f"**Dirección:** {cliente_info['direccion'] or 'N/I'}")
+
+                        st.markdown("---")
+                        st.subheader("📜 Pólizas Asociadas")
+
+                        # Revisar si tiene pólizas
+                        df_polizas = df_cli.dropna(subset=["numero_poliza"])
+
+                        if not df_polizas.empty:
+                            # Formatear la tabla de pólizas del cliente
+                            tabla_polizas = df_polizas[
+                                [
+                                    "numero_poliza",
+                                    "compañia",
+                                    "ramo",
+                                    "materia_asegurada",
+                                    "fecha_vencimiento",
+                                    "monto_prima_anual",
+                                    "moneda",
+                                    "estado",
+                                ]
+                            ].rename(
+                                columns={
+                                    "numero_poliza": "N° Póliza",
+                                    "compañia": "Aseguradora",
+                                    "ramo": "Ramo",
+                                    "materia_asegurada": "Materia / Patente",
+                                    "fecha_vencimiento": "Vencimiento",
+                                    "monto_prima_anual": "Prima",
+                                    "moneda": "Moneda",
+                                    "estado": "Estado",
+                                }
+                            )
+
+                            st.dataframe(
+                                tabla_polizas,
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+                        else:
+                            st.info("Este cliente no tiene pólizas registradas aún.")
+            else:
+                st.warning(
+                    f"❌ No se encontró ningún cliente o póliza con el término: **'{busqueda}'**"
+                )
+
+        except Exception as e:
+            st.error(f"Error en la búsqueda: {e}")
+    else:
+        st.info("💡 Escribe en la barra de arriba para iniciar la búsqueda rápida.")
 
 # ---------------------------------------------------------
-# VISTA 3: DIRECTORIO DE CLIENTES
+# VISTA 2: DASHBOARD & VENCIMIENTOS
 # ---------------------------------------------------------
-elif menu == "Directorio de Clientes":
-    st.header("👥 Lista de Clientes Registrados")
+elif menu == "📊 Dashboard & Vencimientos":
+    st.title("📊 Resumen y Vencimientos")
+    st.write("Vista para analizar alertas periódicas de vencimiento.")
 
-    try:
-        conn = get_connection()
-        df_clientes = pd.read_sql(
-            "SELECT id_cliente, rut, nombre_completo, email, telefono FROM clientes",
-            conn,
-        )
-        conn.close()
+# ---------------------------------------------------------
+# VISTA 3: NUEVO REGISTRO
+# ---------------------------------------------------------
+elif menu == "➕ Nuevo Cliente / Póliza":
+    st.title("➕ Ingrese Datos Manualmente")
 
-        st.dataframe(df_clientes, use_container_width=True)
-    except Exception as e:
-        st.error(f"Error al cargar clientes: {e}")
+# ---------------------------------------------------------
+# VISTA 4: IMPORTADOR EXCEL
+# ---------------------------------------------------------
+elif menu == "📥 Importador Excel":
+    st.title("📥 Importación Masiva")
