@@ -151,7 +151,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN DE EXCEL
+# MÓDULO DE IMPORTACIÓN DE EXCEL CON LIMPIEZA DE BD
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -160,6 +160,11 @@ with col_acc1:
         st.caption("Carga tu archivo de cartera (.xlsx / .xls)")
         uploaded_file = st.file_uploader(
             "Selecciona tu archivo Excel", type=["xlsx", "xls"]
+        )
+
+        limpiar_bd = st.checkbox(
+            "⚠️ Vaciar datos antiguos antes de importar (Recomendado)",
+            value=True,
         )
 
         if uploaded_file:
@@ -186,12 +191,11 @@ with col_acc1:
 
                 df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # MAPEO EXPRESO PARA RIESGO ASEGURADO Y RAMO
+                # MAPEO PRECISO: Columna "Riesgo Asegurado" -> Materia_Asegurada
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
 
-                    # Prioridad 1: Riesgo Asegurado (Marca, Modelo, Patente)
                     if "riesgo" in c_clean:
                         col_map[col] = "Materia_Asegurada"
                     elif "ramo" in c_clean or "tipo" in c_clean:
@@ -254,6 +258,14 @@ with col_acc1:
                 if st.button("🚀 Confirmar e Importar Todos a Aiven"):
                     conn = get_connection()
                     cursor = conn.cursor()
+
+                    if limpiar_bd:
+                        cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+                        cursor.execute("TRUNCATE TABLE polizas;")
+                        cursor.execute("TRUNCATE TABLE clientes;")
+                        cursor.execute("TRUNCATE TABLE compañias;")
+                        cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+
                     registros_procesados = 0
 
                     for i, r in df_excel.iterrows():
@@ -311,7 +323,7 @@ with col_acc1:
                             else "General"
                         )
 
-                        # Extraer Riesgo Asegurado (Suzuki Swift, Ford Edge, Kia Frontier...)
+                        # Extraer la patente/modelo exacto de "Riesgo Asegurado"
                         raw_materia = r.get("Materia_Asegurada")
                         if pd.notna(raw_materia) and str(raw_materia) != "nan":
                             materia_val = str(raw_materia).strip()
@@ -338,7 +350,6 @@ with col_acc1:
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
-                        # 1. Insertar / Actualizar Cliente
                         if rut_val != "SIN RUT" and rut_val != "nan":
                             cursor.execute(
                                 """
@@ -363,18 +374,21 @@ with col_acc1:
                             )
                             id_cliente = cursor.lastrowid
 
-                        # 2. Insertar Compañía
                         cursor.execute(
                             "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
                             (comp_val,),
                         )
                         id_comp = cursor.lastrowid
 
-                        # 3. Insertar Póliza (Soporta múltiples vehículos por cliente)
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida')
+                            ON DUPLICATE KEY UPDATE 
+                                materia_asegurada=VALUES(materia_asegurada),
+                                ramo=VALUES(ramo),
+                                monto_prima_anual=VALUES(monto_prima_anual),
+                                monto_comision=VALUES(monto_comision);
                         """,
                             (
                                 poliza_val,
@@ -395,7 +409,7 @@ with col_acc1:
                     conn.close()
 
                     st.success(
-                        f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente a Aiven!"
+                        f"🎉 ¡Se importaron {registros_procesados} pólizas con sus Riesgos Asegurados correctamente!"
                     )
                     st.rerun()
 
@@ -675,7 +689,7 @@ if not df.empty:
         with st.expander(label_tarjeta):
             st.markdown('<div class="edit-box">', unsafe_allow_html=True)
 
-            # Banner Informativo con el Riesgo Asegurado exacto (Suzuki Swift, Ford Edge, Kia Frontier...)
+            # Banner Informativo con el Riesgo Asegurado (Suzuki Swift, Ford Edge, Kia Frontier...)
             texto_riesgo = (
                 materia if materia else "Sin riesgo/materia especificada"
             )
