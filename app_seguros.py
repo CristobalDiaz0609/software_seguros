@@ -1,7 +1,6 @@
 import mysql.connector
 import pandas as pd
 import streamlit as st
-from datetime import date
 
 # 1. Configuración de página (Ocultar Sidebar)
 st.set_page_config(
@@ -11,11 +10,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. INYECCIÓN DE CSS PERSONALIZADO (El secreto del diseño)
+# 2. INYECCIÓN DE CSS PERSONALIZADO
 st.markdown(
     """
     <style>
-    /* Fondo principal y ocultar elementos por defecto */
+    /* Ocultar elementos por defecto de Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -25,7 +24,7 @@ st.markdown(
         max-width: 1200px;
     }
 
-    /* Estilo del Encabezado Oscuro (Simulación) */
+    /* Encabezado Oscuro */
     .header-container {
         background-color: #1a3644;
         color: white;
@@ -46,7 +45,7 @@ st.markdown(
         letter-spacing: 1px;
     }
 
-    /* Estilo de Tarjetas de Resumen (Métricas) */
+    /* Tarjetas de Resumen */
     .metric-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -71,11 +70,11 @@ st.markdown(
         letter-spacing: 0.5px;
     }
 
-    /* Estilo de las Tarjetas de Clientes (Lista) */
+    /* Tarjetas de Lista */
     .client-card {
         background-color: white;
         border: 1px solid #e2e8f0;
-        border-left: 4px solid #c53030; /* Borde rojo a la izquierda */
+        border-left: 4px solid #c53030;
         border-radius: 8px;
         padding: 16px 20px;
         margin-bottom: 12px;
@@ -102,7 +101,7 @@ st.markdown(
         margin: 0;
     }
 
-    /* Etiqueta roja de Vencida */
+    /* Etiqueta Vencida */
     .badge-vencida {
         background-color: #c53030;
         color: white;
@@ -116,6 +115,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # 3. CONEXIÓN A BASE DE DATOS
 def get_connection():
     return mysql.connector.connect(
@@ -126,9 +126,8 @@ def get_connection():
         database=st.secrets["mysql"]["database"],
     )
 
-# ---------------------------------------------------------
-# INTERFAZ DE USUARIO SUPERIOR
-# ---------------------------------------------------------
+
+# Encabezado
 st.markdown(
     """
     <div class="header-container">
@@ -139,14 +138,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Barra de Búsqueda (Ocupa todo el ancho)
+# Buscador Principal
 busqueda = st.text_input(
     "Buscador Oculto",
     placeholder="🔍 Buscar por nombre, aseguradora o teléfono...",
     label_visibility="collapsed",
 )
 
-# Filtros Tipo "Pills" (Botones en línea)
+# Filtros Pills
 col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1, 1.2, 1.5, 1.5, 1])
 with col_f1:
     st.button("Todos", use_container_width=True)
@@ -159,17 +158,17 @@ with col_f4:
 with col_f5:
     st.button("Al día", use_container_width=True)
 
-st.write("") # Espaciador
+st.write("")
 
 # ---------------------------------------------------------
-# TARJETAS DE MÉTRICAS (Resumen)
+# TARJETAS DE MÉTRICAS (Clientes dejado en blanco)
 # ---------------------------------------------------------
 col_m1, col_m2, col_m3 = st.columns(3)
 with col_m1:
     st.markdown(
         """
         <div class="metric-card">
-            <p class="metric-value">132</p>
+            <p class="metric-value">—</p>
             <p class="metric-label">CLIENTES</p>
         </div>
         """,
@@ -179,7 +178,7 @@ with col_m2:
     st.markdown(
         """
         <div class="metric-card">
-            <p class="metric-value red">96</p>
+            <p class="metric-value red">0</p>
             <p class="metric-label">VENCIDAS</p>
         </div>
         """,
@@ -196,16 +195,14 @@ with col_m3:
         unsafe_allow_html=True,
     )
 
-st.write("") # Espaciador
-st.write("") # Espaciador
+st.write("")
+st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DE CLIENTES / PÓLIZAS (Simulación visual)
+# LISTADO
 # ---------------------------------------------------------
-
 try:
     conn = get_connection()
-    # Consulta a la base de datos (con límite para la demo)
     query = """
         SELECT 
             c.nombre_completo,
@@ -216,31 +213,26 @@ try:
         FROM clientes c
         LEFT JOIN polizas p ON c.id_cliente = p.id_cliente
         LEFT JOIN compañias co ON p.id_compañia = co.id_compañia
-        ORDER BY p.fecha_vencimiento ASC
-        LIMIT 10;
+        ORDER BY p.fecha_vencimiento ASC;
     """
     df = pd.read_sql(query, conn)
     conn.close()
 
     if df.empty:
-        st.info("No hay datos para mostrar. Importa un Excel para comenzar.")
+        st.info("No hay información registrada en la base de datos.")
     else:
         for idx, row in df.iterrows():
-            nombre = str(row['nombre_completo']).upper()
-            aseguradora = str(row['compañia']).upper()
-            poliza = str(row['poliza'])
-            prima = row['prima']
-            
-            # Formatear el precio
-            precio_formato = f"${prima} / prima"
+            nombre = str(row["nombre_completo"]).upper()
+            aseguradora = str(row["compañia"]).upper()
+            poliza = str(row["poliza"])
+            prima = row["prima"]
 
-            # Renderizar la tarjeta HTML
             html_card = f"""
             <div class="client-card">
                 <div>
                     <p class="client-name">{nombre}</p>
                     <p class="client-details">{aseguradora} · {poliza}</p>
-                    <p class="client-price">{precio_formato}</p>
+                    <p class="client-price">${prima} / prima</p>
                 </div>
                 <div>
                     <span class="badge-vencida">Vencida</span>
@@ -250,32 +242,4 @@ try:
             st.markdown(html_card, unsafe_allow_html=True)
 
 except Exception as e:
-    # Si hay error (o base de datos vacía), mostramos el diseño mockeado
-    # igual al de la imagen para que veas que funciona visualmente
-    
-    st.markdown(
-        """
-        <div class="client-card">
-            <div>
-                <p class="client-name">CONDOMINIO EDIFICIO CABILDO</p>
-                <p class="client-details">BCISEGUROS · SP630167</p>
-                <p class="client-price">$116,04 / prima</p>
-            </div>
-            <div>
-                <span class="badge-vencida">Vencida hace 739798d</span>
-            </div>
-        </div>
-
-        <div class="client-card">
-            <div>
-                <p class="client-name">GERARDO FUENTES PALOMINOS</p>
-                <p class="client-details">RENTA NACIONAL · —</p>
-                <p class="client-price">$17,28 / prima</p>
-            </div>
-            <div>
-                <span class="badge-vencida">Vencida hace 739740d</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.info("Conexión lista. Listo para empezar a cargar y visualizar pólizas.")
