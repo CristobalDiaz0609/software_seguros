@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 import mysql.connector
 import pandas as pd
@@ -80,6 +81,23 @@ def get_connection():
     )
 
 
+# Función auxiliar para extraer y formatear fechas
+def parse_custom_date(val):
+    if pd.isna(val):
+        return datetime.now().strftime("%Y-%m-%d")
+    val_str = str(val).strip()
+
+    # Si viene en formato de rango tipo "17 Mayo 2019-2020"
+    match = re.search(r"(\d{1,2}\s+[a-zA-Z]+\s+\d{4})", val_str)
+    if match:
+        val_str = match.group(1)
+
+    try:
+        return pd.to_datetime(val_str, dayfirst=True).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
 # Encabezado principal
 st.markdown(
     """
@@ -98,74 +116,92 @@ col_acc1, col_acc2 = st.columns([1, 1])
 
 with col_acc1:
     with st.expander("📥 Subir Planilla Excel"):
-        st.caption("Carga tu archivo de cartera (.xlsx) en cualquier formato.")
+        st.caption("Carga tu archivo de cartera (.xlsx / .xls)")
         uploaded_file = st.file_uploader(
-            "Selecciona tu archivo Excel (.xlsx)", type=["xlsx", "xls"]
+            "Selecciona tu archivo Excel", type=["xlsx", "xls"]
         )
 
         if uploaded_file:
             try:
-                # 1. Leer primeras filas para encontrar la cabecera real
-                df_raw = pd.read_excel(uploaded_file)
+                # 1. Leer el Excel sin asumir estructura inicial
+                df_raw = pd.read_excel(uploaded_file, header=None)
 
-                header_row = 0
-                if "Unnamed:" in str(df_raw.columns[0]):
-                    for idx in range(min(15, len(df_raw))):
-                        row_text = (
-                            " ".join(df_raw.iloc[idx].astype(str))
-                            .lower()
-                            .strip()
-                        )
-                        if any(
-                            k in row_text
-                            for k in [
-                                "compa",
-                                "corredor",
-                                "vigencia",
-                                "nombre",
-                                "cliente",
-                                "ren.",
-                            ]
-                        ):
-                            header_row = idx + 1
-                            break
-                    df_excel = pd.read_excel(uploaded_file, header=header_row)
+                # Buscar la fila de encabezados convirtiendo CADA elemento a str
+                header_idx = None
+                for idx, row in df_raw.iterrows():
+                    cells_as_str = [
+                        str(cell)
+                        for cell in row.values
+                        if pd.notna(cell)
+                    ]
+                    row_str = " ".join(cells_as_str).lower().strip()
+
+                    if any(
+                        k in row_str
+                        for k in [
+                            "compa",
+                            "corredor",
+                            "vigencia",
+                            "nombre",
+                            "asegurado",
+                            "poliza",
+                        ]
+                    ):
+                        header_idx = idx
+                        break
+
+                if header_idx is not None:
+                    df_excel = pd.read_excel(uploaded_file, header=header_idx)
                 else:
-                    df_excel = df_raw
+                    df_excel = pd.read_excel(uploaded_file)
 
-                # Limpieza de filas vacías
-                df_excel = df_excel.dropna(how="all").reset_index(drop=True)
+                # Limpieza de nombres de columnas
+                df_excel.columns = df_excel.columns.astype(str).str.strip()
 
                 # 2. Mapeo dinámico de nombres de columnas
                 col_map = {}
                 for col in df_excel.columns:
-                    c_clean = str(col).strip().lower()
-                    if "compa" in c_clean:
+                    c_clean = str(col).lower()
+                    if "asegurado" in c_clean and "rut" not in c_clean:
+                        col_map[col] = "Nombre"
+                    elif "rut" in c_clean:
+                        col_map[col] = "RUT"
+                    elif "compañí" in c_clean or "compañi" in c_clean:
                         col_map[col] = "Compañia"
+                    elif "poliza" in c_clean or "póliza" in c_clean:
+                        col_map[col] = "Poliza"
                     elif (
                         "vigencia" in c_clean
                         or "venc" in c_clean
                         or "ren." in c_clean
                     ):
                         col_map[col] = "Vencimiento"
-                    elif (
-                        "nombre" in c_clean
-                        or "cliente" in c_clean
-                        or "corredor" in c_clean
-                    ):
-                        col_map[col] = "Nombre"
+                    elif "riesgo" in c_clean or "ramo" in c_clean:
+                        col_map[col] = "Ramo"
                     elif "prima" in c_clean:
                         col_map[col] = "Prima"
                     elif "comision" in c_clean or "comisi" in c_clean:
-                        col_map[col] = "Comision"
-                    elif "poliza" in c_clean or "póliza" in c_clean:
-                        col_map[col] = "Poliza"
-                    elif "ramo" in c_clean or "tipo" in c_clean:
-                        col_map[col] = "Ramo"
+                        if "Comision" not in col_map.values():
+                            col_map[col] = "Comision"
+                    elif "telefono" in c_clean or "teléfono" in c_clean:
+                        col_map[col] = "Telefono"
+                    elif "correo" in c_clean or "email" in c_clean:
+                        col_map[col] = "Email"
 
                 df_excel = df_excel.rename(columns=col_map)
 
-                st.write("🔍 **Vista previa procesada (Encabezados detectados):**")
+                # Limpiar filas de subtítulos superiores o totales
+                if "Nombre" in df_excel.columns:
+                    df_excel = df_excel[
+                        df_excel["Nombre"].notna()
+                        & ~df_excel["Nombre"]
+                        .astype(str)
+                        .str.contains(
+                            "Ventas|Total|Nombre", case=False, na=False
+                        )
+                    ]
+
+                st.write("🔍 **Vista previa procesada (Encabezados listos):**")
                 st.dataframe(df_excel.head(5), use_container_width=True)
 
                 if st.button("🚀 Confirmar e Importar a Aiven"):
@@ -174,33 +210,41 @@ with col_acc1:
                     registros_procesados = 0
 
                     for _, row in df_excel.iterrows():
-                        rut_val = str(row.get("RUT", "SIN RUT")).strip()
                         nombre_val = str(
                             row.get("Nombre", "CLIENTE SIN NOMBRE")
                         ).strip()
+
+                        if (
+                            not nombre_val
+                            or nombre_val.lower() == "nan"
+                            or nombre_val.lower() == "none"
+                        ):
+                            continue
+
+                        rut_val = str(row.get("RUT", "SIN RUT")).strip()
                         tel_val = str(row.get("Telefono", "")).strip()
                         email_val = str(row.get("Email", "")).strip()
                         comp_val = str(row.get("Compañia", "GENERAL")).strip()
                         poliza_val = str(row.get("Poliza", "S/N")).strip()
                         ramo_val = str(row.get("Ramo", "General")).strip()
 
-                        # Manejo seguro de fechas
-                        raw_venc = row.get("Vencimiento")
-                        try:
-                            venc_val = pd.to_datetime(raw_venc).strftime(
-                                "%Y-%m-%d"
-                            )
-                        except Exception:
-                            venc_val = datetime.now().strftime("%Y-%m-%d")
+                        venc_val = parse_custom_date(row.get("Vencimiento"))
 
-                        # Manejo numérico
                         try:
-                            prima_val = float(row.get("Prima", 0))
+                            prima_val = float(
+                                str(row.get("Prima", 0))
+                                .replace(",", ".")
+                                .replace("$", "")
+                            )
                         except (ValueError, TypeError):
                             prima_val = 0.0
 
                         try:
-                            comision_val = float(row.get("Comision", 0))
+                            comision_val = float(
+                                str(row.get("Comision", 0))
+                                .replace(",", ".")
+                                .replace("$", "")
+                            )
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
