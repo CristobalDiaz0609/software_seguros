@@ -193,9 +193,9 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN DE EXCEL
+# MÓDULOS SUPERIORES (IMPORTAR, CREAR Y COMPLETAR DATOS)
 # ---------------------------------------------------------
-col_acc1, col_acc2 = st.columns([1, 1])
+col_acc1, col_acc2, col_acc3 = st.columns([1, 1, 1])
 
 with col_acc1:
     with st.expander("📥 Subir Planilla Excel"):
@@ -438,6 +438,24 @@ with col_acc2:
                 except Exception as err:
                     st.error(f"Error al guardar: {err}")
 
+# NUEVO MÓDULO: COMPLETAR DATOS FALTANTES
+with col_acc3:
+    with st.expander("🛠️ Completar Datos FALTANTES"):
+        st.caption("Filtra y completa directamente celdas incompletas")
+        filtro_faltante = st.selectbox(
+            "Selecciona el dato que falta:",
+            [
+                "📜 Póliza Faltante",
+                "🆔 RUT Faltante",
+                "📞 Teléfono Faltante",
+                "✉️ Email Faltante",
+                "🏢 Aseguradora Faltante",
+                "🚗 Riesgo / Patente Faltante",
+                "⚠️ Cualquier Dato Faltante",
+            ],
+            key="sb_faltante",
+        )
+
 st.write("")
 
 # Buscador Principal
@@ -564,6 +582,94 @@ with col_m5:
 st.write("")
 
 # ---------------------------------------------------------
+# LÓGICA Y VISTA DE LA TABLA "COMPLETAR DATOS FALTANTES"
+# ---------------------------------------------------------
+if 'sb_faltante' in st.session_state and not df.empty:
+    tipo_f = st.session_state['sb_faltante']
+    
+    # Aplicar Filtro de Faltante
+    df_f = df.copy()
+    if "Póliza" in tipo_f:
+        df_f = df_f[df_f['poliza'].isin(['—', 'S/N', '', 'nan', 'None'])]
+    elif "RUT" in tipo_f:
+        df_f = df_f[df_f['rut'].str.contains('SIN-RUT|SIN RUT|^$', na=True, case=False)]
+    elif "Teléfono" in tipo_f:
+        df_f = df_f[df_f['telefono'].isin(['', 'nan', 'None', '0'])]
+    elif "Email" in tipo_f:
+        df_f = df_f[df_f['email'].isin(['', 'nan', 'None'])]
+    elif "Aseguradora" in tipo_f:
+        df_f = df_f[df_f['compañia'].isin(['GENERAL', 'SIN COMPAÑÍA', '', 'nan', 'None'])]
+    elif "Riesgo" in tipo_f:
+        df_f = df_f[df_f['materia'].isin(['', 'nan', 'None'])]
+    elif "Cualquier" in tipo_f:
+        df_f = df_f[
+            df_f['poliza'].isin(['—', 'S/N', '']) |
+            df_f['rut'].str.contains('SIN-RUT|SIN RUT|^$', na=True, case=False) |
+            df_f['telefono'].isin(['', 'nan', 'None']) |
+            df_f['email'].isin(['', 'nan', 'None']) |
+            df_f['compañia'].isin(['GENERAL', 'SIN COMPAÑÍA', '']) |
+            df_f['materia'].isin(['', 'nan', 'None'])
+        ]
+
+    st.markdown(f"#### 🛠️ Auditoría de Datos: {tipo_f} ({len(df_f)} registros incompletos)")
+    
+    if not df_f.empty:
+        # Preparar columnas editables
+        df_editable = df_f[['id_poliza', 'id_cliente', 'nombre_completo', 'rut', 'telefono', 'email', 'compañia', 'poliza', 'ramo', 'materia']].copy()
+        df_editable.columns = ['ID_Poliza', 'ID_Cliente', 'Nombre', 'RUT', 'Telefono', 'Email', 'Aseguradora', 'N° Poliza', 'Ramo', 'Riesgo / Patente']
+        
+        st.caption("✍️ **Edita directamente las celdas en blanco abajo y presiona Guardar:**")
+        edited_df = st.data_editor(
+            df_editable,
+            disabled=['ID_Poliza', 'ID_Cliente'],
+            hide_index=True,
+            use_container_width=True,
+            key=f"editor_{tipo_f}"
+        )
+        
+        if st.button("💾 Guardar Cambios Masivos en Aiven"):
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                
+                for _, row in edited_df.iterrows():
+                    # 1. Actualizar Cliente
+                    cursor.execute("""
+                        UPDATE clientes 
+                        SET nombre_completo = %s, rut = %s, telefono = %s, email = %s 
+                        WHERE id_cliente = %s;
+                    """, (row['Nombre'], row['RUT'], row['Telefono'], row['Email'], row['ID_Cliente']))
+                    
+                    # 2. Obtener / Crear Compañía
+                    comp_name = str(row['Aseguradora']).strip() or "GENERAL"
+                    cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_name,))
+                    r_c = cursor.fetchone()
+                    if r_c:
+                        id_co_act = r_c[0]
+                    else:
+                        cursor.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_name,))
+                        id_co_act = cursor.lastrowid
+
+                    # 3. Actualizar Póliza
+                    cursor.execute("""
+                        UPDATE polizas 
+                        SET numero_poliza = %s, id_compañia = %s, ramo = %s, materia_asegurada = %s 
+                        WHERE id_poliza = %s;
+                    """, (row['N° Poliza'], id_co_act, row['Ramo'], row['Riesgo / Patente'], row['ID_Poliza']))
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                st.success("🎉 ¡Todos los datos editados han sido actualizados con éxito!")
+                st.rerun()
+            except Exception as err_m:
+                st.error(f"Error actualizando registros: {err_m}")
+    else:
+        st.success("✅ ¡Excelente! No hay registros incompletos para el filtro seleccionado.")
+
+    st.write("---")
+
+# ---------------------------------------------------------
 # SECCIÓN DE GRÁFICOS VISUALES
 # ---------------------------------------------------------
 if not df.empty:
@@ -650,9 +756,7 @@ if not df.empty:
             texto_riesgo = materia if materia else "Sin riesgo/materia especificada"
             st.markdown(f'<div class="materia-banner">🚗 <b>Riesgo Asegurado:</b> {texto_riesgo}</div>', unsafe_allow_html=True)
 
-            # ---------------------------------------------------------
             # MÓDULO DE CONTACTO DIRECTO (WHATSAPP / CORREO)
-            # ---------------------------------------------------------
             phone_formatted = format_chile_phone(tel)
             msg_ws = f"Hola {nombre.title()}, te saludo de Seguros Patagonia. Te contacto para recordarte que tu póliza N° {poliza} correspondiente a {texto_riesgo} vence el {venc_str}. ¿Te ayudo con la renovación?"
             ws_url = f"https://wa.me/{phone_formatted}?text={urllib.parse.quote(msg_ws)}" if phone_formatted else ""
@@ -679,7 +783,7 @@ if not df.empty:
             btn_html += "</div>"
             st.markdown(btn_html, unsafe_allow_html=True)
 
-            # Formulario de Edición
+            # Formulario de Edición Individual
             with st.form(key=f"form_edit_{id_poliza}_{idx}"):
                 st.markdown("## ✏️ Editar Información de la Póliza")
                 st.write("")
