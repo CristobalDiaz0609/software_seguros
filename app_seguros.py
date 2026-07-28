@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timedelta
+import urllib.parse
 import mysql.connector
 import pandas as pd
 import plotly.express as px
@@ -80,6 +81,37 @@ st.markdown(
         color: #2c5282;
     }
 
+    /* Estilos Botones de Contacto Directo */
+    .btn-contact {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 16px;
+        font-size: 14px;
+        font-weight: 700;
+        border-radius: 8px;
+        text-decoration: none !important;
+        margin-right: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+        transition: all 0.2s ease;
+    }
+    .btn-ws {
+        background-color: #25D366;
+        color: white !important;
+    }
+    .btn-ws:hover {
+        background-color: #1ebc57;
+        transform: translateY(-1px);
+    }
+    .btn-email {
+        background-color: #3182ce;
+        color: white !important;
+    }
+    .btn-email:hover {
+        background-color: #2b6cb0;
+        transform: translateY(-1px);
+    }
+
     div.stButton > button[kind="primary"], div.stFormSubmitButton > button {
         background: linear-gradient(135deg, #2f855a 0%, #276749 100%) !important;
         color: white !important;
@@ -135,6 +167,20 @@ def clean_val(val, default=""):
     return s
 
 
+def format_chile_phone(tel_raw):
+    """Limpia el teléfono para dejarlo en formato WhatsApp internacional (+56)"""
+    digits = re.sub(r"\D", "", str(tel_raw))
+    if not digits:
+        return ""
+    if len(digits) == 9 and digits.startswith("9"):
+        return f"56{digits}"
+    elif len(digits) == 8:
+        return f"569{digits}"
+    elif len(digits) == 11 and digits.startswith("56"):
+        return digits
+    return digits
+
+
 # Encabezado
 st.markdown(
     """
@@ -147,7 +193,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN DE EXCEL INTELIGENTE Y SEGURO
+# MÓDULO DE IMPORTACIÓN DE EXCEL
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -272,7 +318,6 @@ with col_acc1:
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
-                        # 1. Insertar / Buscar Cliente
                         cursor.execute("SELECT id_cliente FROM clientes WHERE rut = %s;", (rut_val,))
                         row_c = cursor.fetchone()
                         if row_c:
@@ -284,19 +329,14 @@ with col_acc1:
                             )
                             id_cliente = cursor.lastrowid
 
-                        # 2. Insertar / Buscar Compañía
                         cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_val,))
                         row_co = cursor.fetchone()
                         if row_co:
                             id_comp = row_co[0]
                         else:
-                            cursor.execute(
-                                "INSERT INTO compañias (nombre) VALUES (%s);",
-                                (comp_val,)
-                            )
+                            cursor.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_val,))
                             id_comp = cursor.lastrowid
 
-                        # 3. Insertar Póliza limpia
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
@@ -524,7 +564,7 @@ with col_m5:
 st.write("")
 
 # ---------------------------------------------------------
-# SECCIÓN DE GRÁFICOS VISUALES Y ANALÍTICA
+# SECCIÓN DE GRÁFICOS VISUALES
 # ---------------------------------------------------------
 if not df.empty:
     with st.expander("📊 Ver Análisis Gráfico de Cartera", expanded=False):
@@ -577,7 +617,7 @@ if not df.empty:
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE MOSTRANDO RIESGO ASEGURADO REAL
+# LISTADO DESPLEGABLE CON BOTONES DINÁMICOS DE CONTACTO
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
@@ -597,8 +637,10 @@ if not df.empty:
         venc_raw = row["fecha_vencimiento"]
         try:
             venc_date = pd.to_datetime(venc_raw).date() if pd.notna(venc_raw) else datetime.now().date()
+            venc_str = venc_date.strftime("%d/%m/%Y")
         except Exception:
             venc_date = datetime.now().date()
+            venc_str = venc_date.strftime("%d/%m/%Y")
 
         label_tarjeta = f"👤 {nombre}  |  {aseguradora} · Póliza: {poliza} ({ramo})"
 
@@ -608,6 +650,36 @@ if not df.empty:
             texto_riesgo = materia if materia else "Sin riesgo/materia especificada"
             st.markdown(f'<div class="materia-banner">🚗 <b>Riesgo Asegurado:</b> {texto_riesgo}</div>', unsafe_allow_html=True)
 
+            # ---------------------------------------------------------
+            # MÓDULO DE CONTACTO DIRECTO (WHATSAPP / CORREO)
+            # ---------------------------------------------------------
+            phone_formatted = format_chile_phone(tel)
+            msg_ws = f"Hola {nombre.title()}, te saludo de Seguros Patagonia. Te contacto para recordarte que tu póliza N° {poliza} correspondiente a {texto_riesgo} vence el {venc_str}. ¿Te ayudo con la renovación?"
+            ws_url = f"https://wa.me/{phone_formatted}?text={urllib.parse.quote(msg_ws)}" if phone_formatted else ""
+
+            email_subject = f"Recordatorio de Renovación de Póliza {poliza} - Seguros Patagonia"
+            email_body = f"Estimado/a {nombre.title()},\n\nEsperando que se encuentre muy bien, le escribimos para recordarle que su póliza N° {poliza} ({texto_riesgo}) con la compañía {aseguradora} tiene fecha de vencimiento para el {venc_str}.\n\nQuedamos a su entera disposición para coordinar la renovación y revisar las mejores condiciones para su cobertura.\n\nSaludos cordiales,\nSeguros Patagonia"
+            mailto_url = f"mailto:{email}?subject={urllib.parse.quote(email_subject)}&body={urllib.parse.quote(email_body)}" if email else ""
+
+            st.markdown("##### 🚀 Acciones Rápidas de Contacto")
+            btn_html = "<div style='margin-bottom: 20px;'>"
+            has_action = False
+
+            if ws_url:
+                btn_html += f'<a href="{ws_url}" target="_blank" class="btn-contact btn-ws">💬 Recordar por WhatsApp</a>'
+                has_action = True
+
+            if mailto_url:
+                btn_html += f'<a href="{mailto_url}" target="_blank" class="btn-contact btn-email">✉️ Enviar Correo de Renovación</a>'
+                has_action = True
+
+            if not has_action:
+                btn_html += '<span style="color:#a0aec0; font-size:13px; font-style:italic;">⚠️ No hay teléfono ni correo registrado para contacto directo.</span>'
+
+            btn_html += "</div>"
+            st.markdown(btn_html, unsafe_allow_html=True)
+
+            # Formulario de Edición
             with st.form(key=f"form_edit_{id_poliza}_{idx}"):
                 st.markdown("## ✏️ Editar Información de la Póliza")
                 st.write("")
