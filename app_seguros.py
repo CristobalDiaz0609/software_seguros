@@ -48,23 +48,15 @@ st.markdown(
     .metric-value.red { color: #c53030; }
     .metric-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; }
 
-    .client-card {
-        background-color: white;
+    /* Ficha de detalle de póliza */
+    .detail-box {
+        background-color: #f7fafc;
         border: 1px solid #e2e8f0;
-        border-left: 4px solid #c53030;
         border-radius: 8px;
-        padding: 16px 20px;
-        margin-bottom: 12px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        padding: 15px;
+        margin-top: 5px;
+        margin-bottom: 10px;
     }
-    .client-name { font-size: 16px; font-weight: 700; color: #1a202c; margin: 0 0 4px 0; }
-    .client-details { font-size: 13px; color: #718096; margin: 0 0 6px 0; }
-    .client-price { font-size: 13px; font-weight: 600; color: #2d3748; margin: 0; }
-    .badge-vencida { background-color: #c53030; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-    .badge-vigente { background-color: #2f855a; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -123,7 +115,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# IMPORTADOR DE EXCEL ROBUSTO
+# MÓDULO DE IMPORTACIÓN DE EXCEL
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -436,9 +428,7 @@ busqueda = st.text_input(
     label_visibility="collapsed",
 )
 
-# ---------------------------------------------------------
-# FILTROS ACTIVOS (Interaccion de botones)
-# ---------------------------------------------------------
+# FILTROS
 filtro_seleccionado = st.pills(
     "Filtrar por estado",
     [
@@ -455,7 +445,7 @@ filtro_seleccionado = st.pills(
 st.write("")
 
 # ---------------------------------------------------------
-# CÁLCULOS Y LISTADO DE CLIENTES
+# CÁLCULOS Y CONSULTA
 # ---------------------------------------------------------
 total_clientes = 0
 total_comision_mes_actual = 0.0
@@ -479,7 +469,10 @@ try:
     query_base = """
         SELECT 
             c.id_cliente,
+            c.rut,
             c.nombre_completo,
+            c.email,
+            c.telefono,
             COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia,
             COALESCE(p.numero_poliza, '—') as poliza,
             COALESCE(p.ramo, 'General') as ramo,
@@ -498,7 +491,6 @@ try:
     if busqueda:
         query_base += f" AND (c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%' OR p.materia_asegurada LIKE '%{busqueda}%')"
 
-    # Lógica de Filtros por Estado/Fecha
     if filtro_seleccionado == "Vencidas":
         query_base += f" AND (p.fecha_vencimiento < '{hoy.strftime('%Y-%m-%d')}' OR p.estado = 'Vencida')"
     elif filtro_seleccionado == "Vence ≤15 días":
@@ -528,7 +520,6 @@ try:
     )
 
     if not df.empty:
-        # Calcular el número total de clientes únicos
         total_clientes = df["id_cliente"].nunique()
 
 except Exception as e:
@@ -566,7 +557,9 @@ with col_m4:
 st.write("")
 st.write("")
 
-# Renderizado del listado
+# ---------------------------------------------------------
+# LISTADO DESPLEGABLE CON DETALLE COMPLETO
+# ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
         nombre = str(row["nombre_completo"]).upper()
@@ -578,35 +571,44 @@ if not df.empty:
         comision_real = row["comision"]
         moneda = row["moneda"]
         venc = row["fecha_vencimiento"]
+        rut = row["rut"]
+        email = row["email"] or "No registrado"
+        tel = row["telefono"] or "No registrado"
 
-        # Determinar si está vencida o al día
-        es_vencida = True
-        if venc and pd.notna(venc):
-            es_vencida = pd.to_datetime(venc) < pd.to_datetime(
-                datetime.now().date()
+        # Título de la tarjeta expandible
+        label_tarjeta = f"👤 {nombre}  |  {aseguradora} · Póliza: {poliza} ({ramo})"
+
+        with st.expander(label_tarjeta):
+            # Contenido detallado de la póliza
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                st.markdown("### 👤 Datos del Cliente")
+                st.write(f"**Nombre:** {nombre}")
+                st.write(f"**RUT:** {rut}")
+                st.write(f"**Teléfono:** {tel}")
+                st.write(f"**Email:** {email}")
+
+            with c2:
+                st.markdown("### 📜 Detalle Póliza")
+                st.write(f"**Aseguradora:** {aseguradora}")
+                st.write(f"**N° Póliza:** {poliza}")
+                st.write(f"**Ramo:** {ramo}")
+                st.write(
+                    f"**Materia Asegurada:** {materia if materia else 'Sin especificación'}"
+                )
+
+            with c3:
+                st.markdown("### 💰 Finanzas & Fechas")
+                st.write(f"**Monto Prima:** ${prima:,.2f} {moneda}")
+                st.write(f"**Comisión:** ${comision_real:,.2f}")
+                st.write(f"**Vencimiento:** {venc}")
+
+            st.button(
+                "💬 Contactar Cliente",
+                key=f"btn_contact_{idx}_{poliza}",
+                use_container_width=True,
             )
 
-        badge_html = (
-            '<span class="badge-vencida">Vencida</span>'
-            if es_vencida
-            else '<span class="badge-vigente">Al día</span>'
-        )
-        detalle_materia = f" ({materia})" if materia else ""
-
-        html_card = f"""
-        <div class="client-card">
-            <div>
-                <p class="client-name">{nombre}</p>
-                <p class="client-details">{aseguradora} · {poliza} · <span style="color:#1a3644; font-weight:600;">{ramo}</span>{detalle_materia}</p>
-                <p class="client-price">${prima:,.2f} {moneda} / prima <span style="color:#2f855a; font-size:12px; margin-left:10px;">(Comisión: ${comision_real:,.2f})</span></p>
-            </div>
-            <div>
-                {badge_html}
-            </div>
-        </div>
-        """
-        st.markdown(html_card, unsafe_allow_html=True)
 else:
-    st.info(
-        "No hay registros que coincidan con el filtro seleccionado. Prueba cambiando la selección arriba."
-    )
+    st.info("No hay registros que coincidan con el filtro seleccionado.")
