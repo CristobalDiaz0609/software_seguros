@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. CSS Personalizado
+# 2. CSS PERSONALIZADO MEJORADO (Estilos SaaS Coloridos y Pulidos)
 st.markdown(
     """
     <style>
@@ -26,27 +26,65 @@ st.markdown(
     }
 
     .header-container {
-        background-color: #1a3644;
+        background: linear-gradient(135deg, #1a3644 0%, #2a4d60 100%);
         color: white;
-        padding: 20px;
-        border-radius: 10px;
+        padding: 22px 25px;
+        border-radius: 12px;
         margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
-    .header-title { font-size: 24px; font-weight: 700; margin: 0; }
-    .header-subtitle { font-size: 12px; color: #a0aec0; margin-top: -5px; text-transform: uppercase; letter-spacing: 1px; }
+    .header-title { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
+    .header-subtitle { font-size: 12px; color: #cbd5e0; margin-top: -3px; text-transform: uppercase; letter-spacing: 1.5px; }
 
+    /* Tarjetas Métricas */
     .metric-card {
         background-color: white;
         border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 15px 20px;
+        border-radius: 12px;
+        padding: 16px 20px;
         text-align: left;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.03);
     }
-    .metric-value { font-size: 26px; font-weight: 700; color: #1a202c; margin-bottom: -5px; }
-    .metric-value.green { color: #2f855a; }
-    .metric-value.red { color: #c53030; }
-    .metric-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; }
+    .metric-value { font-size: 26px; font-weight: 800; color: #1a202c; margin-bottom: -5px; }
+    .metric-value.green { color: #276749; }
+    .metric-value.red { color: #9b2c2c; }
+    .metric-label { font-size: 11px; color: #718096; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
+
+    /* Estilos Ficha de Edición */
+    .edit-box {
+        background-color: #f8fafc;
+        border-left: 5px solid #2b6cb0;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 15px;
+    }
+    .badge-section {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+    .badge-blue { background-color: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; }
+    .badge-purple { background-color: #faf5ff; color: #6b46c1; border: 1px solid #e9d8fd; }
+    .badge-green { background-color: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
+
+    /* Estilo Botón Guardar Cambios */
+    div.stButton > button[kind="primary"], div.stFormSubmitButton > button {
+        background: linear-gradient(135deg, #2f855a 0%, #276749 100%) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        border-radius: 8px !important;
+        border: none !important;
+        padding: 10px 24px !important;
+        box-shadow: 0 2px 6px rgba(47, 133, 90, 0.3) !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    div.stFormSubmitButton > button:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(47, 133, 90, 0.4) !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -549,7 +587,7 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE CON EDICIÓN DIRECTA
+# LISTADO DESPLEGABLE CON EDICIÓN DIRECCIÓN Y DISEÑO MEJORADO
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
@@ -566,7 +604,6 @@ if not df.empty:
         email = str(row["email"] or "")
         tel = str(row["telefono"] or "")
 
-        # Manejo seguro de fecha de vencimiento
         venc_raw = row["fecha_vencimiento"]
         try:
             venc_date = (
@@ -580,20 +617,30 @@ if not df.empty:
         label_tarjeta = f"👤 {nombre}  |  {aseguradora} · Póliza: {poliza} ({ramo})"
 
         with st.expander(label_tarjeta):
+            # Envoltorio visual con borde lateral colorido
+            st.markdown('<div class="edit-box">', unsafe_allow_html=True)
+
             with st.form(key=f"form_edit_{id_poliza}_{idx}"):
-                st.markdown("### ✏️ Editar Información de la Póliza")
+                st.markdown("## ✏️ Editar Información de la Póliza")
+                st.write("")
 
                 c1, c2, c3 = st.columns(3)
 
                 with c1:
-                    st.subheader("👤 Cliente")
+                    st.markdown(
+                        '<span class="badge-section badge-blue">👤 Cliente</span>',
+                        unsafe_allow_html=True,
+                    )
                     edit_nombre = st.text_input("Nombre Completo", value=nombre)
                     edit_rut = st.text_input("RUT", value=rut)
                     edit_tel = st.text_input("Teléfono", value=tel)
                     edit_email = st.text_input("Email", value=email)
 
                 with c2:
-                    st.subheader("📜 Póliza")
+                    st.markdown(
+                        '<span class="badge-section badge-purple">📜 Póliza</span>',
+                        unsafe_allow_html=True,
+                    )
                     edit_comp = st.text_input("Aseguradora", value=aseguradora)
                     edit_poliza = st.text_input("N° Póliza", value=poliza)
                     edit_ramo = st.text_input("Ramo", value=ramo)
@@ -602,7 +649,10 @@ if not df.empty:
                     )
 
                 with c3:
-                    st.subheader("💰 Finanzas & Fecha")
+                    st.markdown(
+                        '<span class="badge-section badge-green">💰 Finanzas & Fecha</span>',
+                        unsafe_allow_html=True,
+                    )
                     edit_prima = st.number_input(
                         "Monto Prima", min_value=0.0, value=prima
                     )
@@ -613,6 +663,7 @@ if not df.empty:
                         "Fecha Vencimiento", value=venc_date
                     )
 
+                st.write("")
                 btn_guardar_cambios = st.form_submit_button(
                     "💾 Guardar Cambios"
                 )
@@ -638,7 +689,7 @@ if not df.empty:
                             ),
                         )
 
-                        # 2. Actualizar o Insertar Compañía si cambió
+                        # 2. Actualizar o Insertar Compañía
                         cursor.execute(
                             "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
                             (edit_comp,),
@@ -676,6 +727,8 @@ if not df.empty:
 
                     except Exception as err:
                         st.error(f"Error al actualizar la póliza: {err}")
+
+            st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.info("No hay registros que coincidan con el filtro seleccionado.")
