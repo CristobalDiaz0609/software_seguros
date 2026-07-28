@@ -69,13 +69,14 @@ st.markdown(
     .badge-green { background-color: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
 
     .materia-banner {
-        background-color: #edf2f7;
-        border-left: 4px solid #3182ce;
-        padding: 10px 15px;
-        border-radius: 6px;
+        background-color: #ebf8ff;
+        border-left: 4px solid #2b6cb0;
+        padding: 12px 16px;
+        border-radius: 8px;
         margin-bottom: 15px;
-        font-weight: 600;
-        color: #2d3748;
+        font-size: 15px;
+        font-weight: 700;
+        color: #2c5282;
     }
 
     div.stButton > button[kind="primary"], div.stFormSubmitButton > button {
@@ -185,24 +186,22 @@ with col_acc1:
 
                 df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # MAPEO REFORZADO: 'RIESGO ASEGURADO' -> Materia_Asegurada
+                # MAPEO EXPRESO PARA RIESGO ASEGURADO Y RAMO
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
-                    if (
-                        "asegurado" in c_clean
-                        and "rut" not in c_clean
-                        and "riesgo" not in c_clean
-                        and "Nombre" not in col_map.values()
-                    ):
-                        col_map[col] = "Nombre"
-                    elif (
-                        "nombre" in c_clean
-                        and "Nombre" not in col_map.values()
-                    ):
-                        col_map[col] = "Nombre"
+
+                    # Prioridad 1: Riesgo Asegurado (Marca, Modelo, Patente)
+                    if "riesgo" in c_clean:
+                        col_map[col] = "Materia_Asegurada"
+                    elif "ramo" in c_clean or "tipo" in c_clean:
+                        col_map[col] = "Ramo"
                     elif "rut" in c_clean and "RUT" not in col_map.values():
                         col_map[col] = "RUT"
+                    elif (
+                        "nombre" in c_clean or "asegurado" in c_clean
+                    ) and "Nombre" not in col_map.values():
+                        col_map[col] = "Nombre"
                     elif (
                         "compañí" in c_clean or "compañi" in c_clean
                     ) and "Compañia" not in col_map.values():
@@ -217,12 +216,6 @@ with col_acc1:
                         or "ren." in c_clean
                     ) and "Vencimiento" not in col_map.values():
                         col_map[col] = "Vencimiento"
-                    elif (
-                        "riesgo" in c_clean
-                    ):  # Acepta "Riesgo", "Riesgo Asegurado", etc.
-                        col_map[col] = "Materia_Asegurada"
-                    elif "ramo" in c_clean or "tipo" in c_clean:
-                        col_map[col] = "Ramo"
                     elif (
                         "prima" in c_clean and "Prima" not in col_map.values()
                     ):
@@ -318,7 +311,7 @@ with col_acc1:
                             else "General"
                         )
 
-                        # Extraer 'RIESGO ASEGURADO'
+                        # Extraer Riesgo Asegurado (Suzuki Swift, Ford Edge, Kia Frontier...)
                         raw_materia = r.get("Materia_Asegurada")
                         if pd.notna(raw_materia) and str(raw_materia) != "nan":
                             materia_val = str(raw_materia).strip()
@@ -345,6 +338,7 @@ with col_acc1:
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
+                        # 1. Insertar / Actualizar Cliente
                         if rut_val != "SIN RUT" and rut_val != "nan":
                             cursor.execute(
                                 """
@@ -369,22 +363,18 @@ with col_acc1:
                             )
                             id_cliente = cursor.lastrowid
 
+                        # 2. Insertar Compañía
                         cursor.execute(
                             "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
                             (comp_val,),
                         )
                         id_comp = cursor.lastrowid
 
-                        # Insertar/Actualizar Póliza
+                        # 3. Insertar Póliza (Soporta múltiples vehículos por cliente)
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida')
-                            ON DUPLICATE KEY UPDATE 
-                                ramo=VALUES(ramo),
-                                materia_asegurada=VALUES(materia_asegurada),
-                                monto_prima_anual=VALUES(monto_prima_anual),
-                                monto_comision=VALUES(monto_comision);
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
                         """,
                             (
                                 poliza_val,
@@ -645,7 +635,7 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE CON RIESGO ASEGURADO CORRECTO
+# LISTADO DESPLEGABLE MOSTRANDO RIESGO ASEGURADO REAL
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
@@ -655,7 +645,7 @@ if not df.empty:
         aseguradora = str(row["compañia"]).upper()
         poliza = str(row["poliza"])
         ramo = str(row["ramo"]).upper()
-        materia = str(row["materia"]).upper()
+        materia = str(row["materia"]).strip()
         prima = float(row["prima"])
         comision_real = float(row["comision"])
         rut = str(row["rut"])
@@ -685,12 +675,12 @@ if not df.empty:
         with st.expander(label_tarjeta):
             st.markdown('<div class="edit-box">', unsafe_allow_html=True)
 
-            # Banner Informativo con el Riesgo Asegurado exacto
+            # Banner Informativo con el Riesgo Asegurado exacto (Suzuki Swift, Ford Edge, Kia Frontier...)
             texto_riesgo = (
                 materia if materia else "Sin riesgo/materia especificada"
             )
             st.markdown(
-                f'<div class="materia-banner">🚗 <b>Riesgo Asegurado (Patente / Bien):</b> {texto_riesgo}</div>',
+                f'<div class="materia-banner">🚗 <b>Riesgo Asegurado:</b> {texto_riesgo}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -719,7 +709,7 @@ if not df.empty:
                     edit_poliza = st.text_input("N° Póliza", value=poliza)
                     edit_ramo = st.text_input("Ramo / Tipo", value=ramo)
                     edit_materia = st.text_input(
-                        "Riesgo Asegurado (Patente/Modelo/Dirección)",
+                        "Riesgo Asegurado (Marca/Modelo/Patente)",
                         value=materia,
                     )
 
