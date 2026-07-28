@@ -81,7 +81,6 @@ def get_connection():
     )
 
 
-# Función auxiliar para desduplicar columnas
 def deduplicate_columns(columns):
     seen = {}
     new_cols = []
@@ -96,7 +95,6 @@ def deduplicate_columns(columns):
     return new_cols
 
 
-# Función para parsear fechas
 def parse_custom_date(val):
     if pd.isna(val):
         return datetime.now().strftime("%Y-%m-%d")
@@ -124,7 +122,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# IMPORTADOR DE EXCEL CON DESDUPLICACIÓN DE COLUMNAS
+# IMPORTADOR DE EXCEL ROBUSTO (Con manejo de duplicados de RUT)
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -137,29 +135,17 @@ with col_acc1:
 
         if uploaded_file:
             try:
-                # 1. Leer archivo
                 df_raw = pd.read_excel(uploaded_file, header=None)
 
-                # Buscar la fila de encabezados
                 header_idx = None
                 for idx, row in df_raw.iterrows():
                     cells_as_str = [
-                        str(cell)
-                        for cell in row.values
-                        if pd.notna(cell)
+                        str(cell) for cell in row.values if pd.notna(cell)
                     ]
                     row_str = " ".join(cells_as_str).lower().strip()
 
-                    if any(
-                        k in row_str
-                        for k in [
-                            "compa",
-                            "corredor",
-                            "vigencia",
-                            "nombre",
-                            "asegurado",
-                            "poliza",
-                        ]
+                    if ("asegurado" in row_str or "nombre" in row_str) and (
+                        "compañ" in row_str or "poliza" in row_str
                     ):
                         header_idx = idx
                         break
@@ -169,10 +155,8 @@ with col_acc1:
                 else:
                     df_excel = pd.read_excel(uploaded_file)
 
-                # Desduplicar nombres de columnas automáticamente
                 df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # Mapeo de columnas
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower()
@@ -208,8 +192,7 @@ with col_acc1:
                     ) and "Ramo" not in col_map.values():
                         col_map[col] = "Ramo"
                     elif (
-                        "prima" in c_clean
-                        and "Prima" not in col_map.values()
+                        "prima" in c_clean and "Prima" not in col_map.values()
                     ):
                         col_map[col] = "Prima"
                     elif (
@@ -226,11 +209,8 @@ with col_acc1:
                         col_map[col] = "Email"
 
                 df_excel = df_excel.rename(columns=col_map)
-
-                # Desduplicar nuevamente tras el rename para evitar colisiones
                 df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # Limpieza de filas vacías
                 if "Nombre" in df_excel.columns:
                     df_excel = df_excel[
                         df_excel["Nombre"].notna()
@@ -241,10 +221,15 @@ with col_acc1:
                         )
                     ]
 
-                st.write("🔍 **Vista previa mapeada y sin duplicados:**")
-                st.dataframe(df_excel.head(5), use_container_width=True)
+                total_filas = len(df_excel)
 
-                if st.button("🚀 Confirmar e Importar a Aiven"):
+                st.success(
+                    f"📊 **Planilla lista:** Se detectaron **{total_filas} registros** válidos para importar."
+                )
+
+                st.dataframe(df_excel.head(10), use_container_width=True)
+
+                if st.button("🚀 Confirmar e Importar Todos a Aiven"):
                     conn = get_connection()
                     cursor = conn.cursor()
                     registros_procesados = 0
@@ -288,24 +273,47 @@ with col_acc1:
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
-                        # Insertar Cliente
-                        cursor.execute(
-                            "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
-                            (rut_val, nombre_val, email_val, tel_val),
-                        )
-                        id_cliente = cursor.lastrowid
+                        # 1. Insertar Cliente o buscar su ID si ya existe por RUT o Nombre
+                        if rut_val != "SIN RUT" and rut_val != "nan":
+                            cursor.execute(
+                                """
+                                INSERT INTO clientes (rut, nombre_completo, email, telefono) 
+                                VALUES (%s, %s, %s, %s)
+                                ON DUPLICATE KEY UPDATE 
+                                    id_cliente=LAST_INSERT_ID(id_cliente),
+                                    nombre_completo=VALUES(nombre_completo);
+                            """,
+                                (rut_val, nombre_val, email_val, tel_val),
+                            )
+                            id_cliente = cursor.lastrowid
+                        else:
+                            cursor.execute(
+                                "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
+                                (
+                                    f"SIN-RUT-{registros_procesados}",
+                                    nombre_val,
+                                    email_val,
+                                    tel_val,
+                                ),
+                            )
+                            id_cliente = cursor.lastrowid
 
-                        # Insertar Compañía
+                        # 2. Insertar Compañía
                         cursor.execute(
                             "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
                             (comp_val,),
                         )
                         id_comp = cursor.lastrowid
 
-                        # Insertar Póliza
+                        # 3. Insertar Póliza (Ignorar o actualizar si la póliza está duplicada)
                         cursor.execute(
-                            """INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                               VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');""",
+                            """
+                            INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
+                            VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida')
+                            ON DUPLICATE KEY UPDATE 
+                                monto_prima_anual=VALUES(monto_prima_anual),
+                                monto_comision=VALUES(monto_comision);
+                        """,
                             (
                                 poliza_val,
                                 id_cliente,
