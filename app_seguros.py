@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. CSS Personalizado (Look & Feel SaaS)
+# 2. CSS Personalizado
 st.markdown(
     """
     <style>
@@ -70,7 +70,7 @@ st.markdown(
 )
 
 
-# 3. Conexión a BD en Aiven
+# 3. Conexión a BD
 def get_connection():
     return mysql.connector.connect(
         host=st.secrets["mysql"]["host"],
@@ -81,13 +81,27 @@ def get_connection():
     )
 
 
-# Función auxiliar para extraer y formatear fechas
+# Función auxiliar para desduplicar columnas
+def deduplicate_columns(columns):
+    seen = {}
+    new_cols = []
+    for col in columns:
+        col_str = str(col).strip()
+        if col_str in seen:
+            seen[col_str] += 1
+            new_cols.append(f"{col_str}_{seen[col_str]}")
+        else:
+            seen[col_str] = 0
+            new_cols.append(col_str)
+    return new_cols
+
+
+# Función para parsear fechas
 def parse_custom_date(val):
     if pd.isna(val):
         return datetime.now().strftime("%Y-%m-%d")
     val_str = str(val).strip()
 
-    # Si viene en formato de rango tipo "17 Mayo 2019-2020"
     match = re.search(r"(\d{1,2}\s+[a-zA-Z]+\s+\d{4})", val_str)
     if match:
         val_str = match.group(1)
@@ -98,7 +112,7 @@ def parse_custom_date(val):
         return datetime.now().strftime("%Y-%m-%d")
 
 
-# Encabezado principal
+# Encabezado
 st.markdown(
     """
     <div class="header-container">
@@ -110,7 +124,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN DE EXCEL INTELIGENTE
+# IMPORTADOR DE EXCEL CON DESDUPLICACIÓN DE COLUMNAS
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -123,10 +137,10 @@ with col_acc1:
 
         if uploaded_file:
             try:
-                # 1. Leer el Excel sin asumir estructura inicial
+                # 1. Leer archivo
                 df_raw = pd.read_excel(uploaded_file, header=None)
 
-                # Buscar la fila de encabezados convirtiendo CADA elemento a str
+                # Buscar la fila de encabezados
                 header_idx = None
                 for idx, row in df_raw.iterrows():
                     cells_as_str = [
@@ -155,42 +169,68 @@ with col_acc1:
                 else:
                     df_excel = pd.read_excel(uploaded_file)
 
-                # Limpieza de nombres de columnas
-                df_excel.columns = df_excel.columns.astype(str).str.strip()
+                # Desduplicar nombres de columnas automáticamente
+                df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # 2. Mapeo dinámico de nombres de columnas
+                # Mapeo de columnas
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower()
-                    if "asegurado" in c_clean and "rut" not in c_clean:
+                    if (
+                        "asegurado" in c_clean
+                        and "rut" not in c_clean
+                        and "Nombre" not in col_map.values()
+                    ):
                         col_map[col] = "Nombre"
-                    elif "rut" in c_clean:
+                    elif (
+                        "nombre" in c_clean
+                        and "Nombre" not in col_map.values()
+                    ):
+                        col_map[col] = "Nombre"
+                    elif "rut" in c_clean and "RUT" not in col_map.values():
                         col_map[col] = "RUT"
-                    elif "compañí" in c_clean or "compañi" in c_clean:
+                    elif (
+                        "compañí" in c_clean or "compañi" in c_clean
+                    ) and "Compañia" not in col_map.values():
                         col_map[col] = "Compañia"
-                    elif "poliza" in c_clean or "póliza" in c_clean:
+                    elif (
+                        "poliza" in c_clean or "póliza" in c_clean
+                    ) and "Poliza" not in col_map.values():
                         col_map[col] = "Poliza"
                     elif (
                         "vigencia" in c_clean
                         or "venc" in c_clean
                         or "ren." in c_clean
-                    ):
+                    ) and "Vencimiento" not in col_map.values():
                         col_map[col] = "Vencimiento"
-                    elif "riesgo" in c_clean or "ramo" in c_clean:
+                    elif (
+                        "riesgo" in c_clean or "ramo" in c_clean
+                    ) and "Ramo" not in col_map.values():
                         col_map[col] = "Ramo"
-                    elif "prima" in c_clean:
+                    elif (
+                        "prima" in c_clean
+                        and "Prima" not in col_map.values()
+                    ):
                         col_map[col] = "Prima"
-                    elif "comision" in c_clean or "comisi" in c_clean:
-                        if "Comision" not in col_map.values():
-                            col_map[col] = "Comision"
-                    elif "telefono" in c_clean or "teléfono" in c_clean:
+                    elif (
+                        "comision" in c_clean or "comisi" in c_clean
+                    ) and "Comision" not in col_map.values():
+                        col_map[col] = "Comision"
+                    elif (
+                        "telefono" in c_clean or "teléfono" in c_clean
+                    ) and "Telefono" not in col_map.values():
                         col_map[col] = "Telefono"
-                    elif "correo" in c_clean or "email" in c_clean:
+                    elif (
+                        "correo" in c_clean or "email" in c_clean
+                    ) and "Email" not in col_map.values():
                         col_map[col] = "Email"
 
                 df_excel = df_excel.rename(columns=col_map)
 
-                # Limpiar filas de subtítulos superiores o totales
+                # Desduplicar nuevamente tras el rename para evitar colisiones
+                df_excel.columns = deduplicate_columns(df_excel.columns)
+
+                # Limpieza de filas vacías
                 if "Nombre" in df_excel.columns:
                     df_excel = df_excel[
                         df_excel["Nombre"].notna()
@@ -201,7 +241,7 @@ with col_acc1:
                         )
                     ]
 
-                st.write("🔍 **Vista previa procesada (Encabezados listos):**")
+                st.write("🔍 **Vista previa mapeada y sin duplicados:**")
                 st.dataframe(df_excel.head(5), use_container_width=True)
 
                 if st.button("🚀 Confirmar e Importar a Aiven"):
