@@ -438,7 +438,7 @@ with col_acc2:
                 except Exception as err:
                     st.error(f"Error al guardar: {err}")
 
-# NUEVO MÓDULO: COMPLETAR DATOS FALTANTES
+# MÓDULO COMPLETAR DATOS FALTANTES (CON FILTRO DE FECHA DE VENCIMIENTO)
 with col_acc3:
     with st.expander("🛠️ Completar Datos FALTANTES"):
         st.caption("Filtra y completa directamente celdas incompletas")
@@ -446,6 +446,7 @@ with col_acc3:
             "Selecciona el dato que falta:",
             [
                 "📜 Póliza Faltante",
+                "📅 Fecha Vencimiento Faltante",
                 "🆔 RUT Faltante",
                 "📞 Teléfono Faltante",
                 "✉️ Email Faltante",
@@ -482,7 +483,125 @@ filtro_seleccionado = st.pills(
 st.write("")
 
 # ---------------------------------------------------------
-# CÁLCULOS Y CONSULTA
+# CONSULTA AUTÓNOMA PARA DATOS FALTANTES (SIN BLOQUEO DE FILTROS)
+# ---------------------------------------------------------
+if 'sb_faltante' in st.session_state:
+    tipo_f = st.session_state['sb_faltante']
+    try:
+        conn_f = get_connection()
+        query_audit = """
+            SELECT 
+                p.id_poliza as ID_Poliza,
+                c.id_cliente as ID_Cliente,
+                c.nombre_completo as Nombre,
+                c.rut as RUT,
+                c.telefono as Telefono,
+                c.email as Email,
+                COALESCE(co.nombre, '') as Aseguradora,
+                COALESCE(p.numero_poliza, '') as N_Poliza,
+                COALESCE(p.ramo, '') as Ramo,
+                COALESCE(p.materia_asegurada, '') as Riesgo_Patente,
+                p.fecha_vencimiento as Fecha_Vencimiento
+            FROM clientes c
+            LEFT JOIN polizas p ON c.id_cliente = p.id_cliente
+            LEFT JOIN compañias co ON p.id_compañia = co.id_compañia
+            WHERE 1=1
+        """
+        df_global_audit = pd.read_sql(query_audit, conn_f)
+        conn_f.close()
+
+        if not df_global_audit.empty:
+            df_f = df_global_audit.copy()
+
+            if "Póliza" in tipo_f:
+                df_f = df_f[df_f['N_Poliza'].isin(['—', 'S/N', '', 'nan', 'None', '0', 'SIN POLIZA'])]
+            elif "Fecha Vencimiento" in tipo_f:
+                df_f = df_f[df_f['Fecha_Vencimiento'].isna() | (df_f['Fecha_Vencimiento'].astype(str) == '')]
+            elif "RUT" in tipo_f:
+                df_f = df_f[df_f['RUT'].str.contains('SIN-RUT|SIN RUT|^$', na=True, case=False)]
+            elif "Teléfono" in tipo_f:
+                df_f = df_f[df_f['Telefono'].isin(['', 'nan', 'None', '0'])]
+            elif "Email" in tipo_f:
+                df_f = df_f[df_f['Email'].isin(['', 'nan', 'None'])]
+            elif "Aseguradora" in tipo_f:
+                df_f = df_f[df_f['Aseguradora'].isin(['GENERAL', 'SIN COMPAÑÍA', '', 'nan', 'None'])]
+            elif "Riesgo" in tipo_f:
+                df_f = df_f[df_f['Riesgo_Patente'].isin(['', 'nan', 'None'])]
+            elif "Cualquier" in tipo_f:
+                df_f = df_f[
+                    df_f['N_Poliza'].isin(['—', 'S/N', '', 'SIN POLIZA']) |
+                    df_f['Fecha_Vencimiento'].isna() |
+                    df_f['RUT'].str.contains('SIN-RUT|SIN RUT|^$', na=True, case=False) |
+                    df_f['Telefono'].isin(['', 'nan', 'None']) |
+                    df_f['Email'].isin(['', 'nan', 'None']) |
+                    df_f['Aseguradora'].isin(['GENERAL', 'SIN COMPAÑÍA', '']) |
+                    df_f['Riesgo_Patente'].isin(['', 'nan', 'None'])
+                ]
+
+            st.markdown(f"#### 🛠️ Auditoría de Datos: {tipo_f} ({len(df_f)} registros incompletos)")
+
+            if not df_f.empty:
+                df_editable = df_f[['ID_Poliza', 'ID_Cliente', 'Nombre', 'RUT', 'Telefono', 'Email', 'Aseguradora', 'N_Poliza', 'Ramo', 'Riesgo_Patente', 'Fecha_Vencimiento']].copy()
+                df_editable.columns = ['ID_Poliza', 'ID_Cliente', 'Nombre', 'RUT', 'Teléfono', 'Email', 'Aseguradora', 'N° Póliza', 'Ramo', 'Riesgo / Patente', 'Fecha Vencimiento']
+
+                st.caption("✍️ **Edita directamente las celdas abajo y presiona Guardar:**")
+                edited_df = st.data_editor(
+                    df_editable,
+                    disabled=['ID_Poliza', 'ID_Cliente'],
+                    hide_index=True,
+                    use_container_width=True,
+                    key=f"editor_global_{tipo_f}"
+                )
+
+                if st.button("💾 Guardar Cambios Masivos en Aiven"):
+                    try:
+                        conn_sav = get_connection()
+                        cursor_sav = conn_sav.cursor()
+
+                        for _, row in edited_df.iterrows():
+                            # 1. Actualizar Cliente
+                            cursor_sav.execute("""
+                                UPDATE clientes 
+                                SET nombre_completo = %s, rut = %s, telefono = %s, email = %s 
+                                WHERE id_cliente = %s;
+                            """, (row['Nombre'], row['RUT'], row['Teléfono'], row['Email'], row['ID_Cliente']))
+
+                            # 2. Obtener / Crear Compañía
+                            comp_name = str(row['Aseguradora']).strip() or "GENERAL"
+                            cursor_sav.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_name,))
+                            r_c = cursor_sav.fetchone()
+                            if r_c:
+                                id_co_act = r_c[0]
+                            else:
+                                cursor_sav.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_name,))
+                                id_co_act = cursor_sav.lastrowid
+
+                            # 3. Formatear Fecha
+                            f_venc = parse_custom_date(row['Fecha Vencimiento'])
+
+                            # 4. Actualizar Póliza
+                            cursor_sav.execute("""
+                                UPDATE polizas 
+                                SET numero_poliza = %s, id_compañia = %s, ramo = %s, materia_asegurada = %s, fecha_vencimiento = %s
+                                WHERE id_poliza = %s;
+                            """, (row['N° Póliza'], id_co_act, row['Ramo'], row['Riesgo / Patente'], f_venc, row['ID_Poliza']))
+
+                        conn_sav.commit()
+                        cursor_sav.close()
+                        conn_sav.close()
+                        st.success("🎉 ¡Todos los datos editados han sido actualizados con éxito!")
+                        st.rerun()
+                    except Exception as err_m:
+                        st.error(f"Error actualizando registros: {err_m}")
+            else:
+                st.success("✅ ¡Excelente! No hay registros incompletos para este filtro en toda la base de datos.")
+
+        st.write("---")
+    except Exception as e_aud:
+        st.error(f"Error consultando datos incompletos: {e_aud}")
+
+# ---------------------------------------------------------
+# CÁLCULOS Y CONSULTA PRINCIPAL
 # ---------------------------------------------------------
 total_clientes = 0
 total_polizas = 0
@@ -580,94 +699,6 @@ with col_m5:
     st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
 
 st.write("")
-
-# ---------------------------------------------------------
-# LÓGICA Y VISTA DE LA TABLA "COMPLETAR DATOS FALTANTES"
-# ---------------------------------------------------------
-if 'sb_faltante' in st.session_state and not df.empty:
-    tipo_f = st.session_state['sb_faltante']
-    
-    # Aplicar Filtro de Faltante
-    df_f = df.copy()
-    if "Póliza" in tipo_f:
-        df_f = df_f[df_f['poliza'].isin(['—', 'S/N', '', 'nan', 'None'])]
-    elif "RUT" in tipo_f:
-        df_f = df_f[df_f['rut'].str.contains('SIN-RUT|SIN RUT|^$', na=True, case=False)]
-    elif "Teléfono" in tipo_f:
-        df_f = df_f[df_f['telefono'].isin(['', 'nan', 'None', '0'])]
-    elif "Email" in tipo_f:
-        df_f = df_f[df_f['email'].isin(['', 'nan', 'None'])]
-    elif "Aseguradora" in tipo_f:
-        df_f = df_f[df_f['compañia'].isin(['GENERAL', 'SIN COMPAÑÍA', '', 'nan', 'None'])]
-    elif "Riesgo" in tipo_f:
-        df_f = df_f[df_f['materia'].isin(['', 'nan', 'None'])]
-    elif "Cualquier" in tipo_f:
-        df_f = df_f[
-            df_f['poliza'].isin(['—', 'S/N', '']) |
-            df_f['rut'].str.contains('SIN-RUT|SIN RUT|^$', na=True, case=False) |
-            df_f['telefono'].isin(['', 'nan', 'None']) |
-            df_f['email'].isin(['', 'nan', 'None']) |
-            df_f['compañia'].isin(['GENERAL', 'SIN COMPAÑÍA', '']) |
-            df_f['materia'].isin(['', 'nan', 'None'])
-        ]
-
-    st.markdown(f"#### 🛠️ Auditoría de Datos: {tipo_f} ({len(df_f)} registros incompletos)")
-    
-    if not df_f.empty:
-        # Preparar columnas editables
-        df_editable = df_f[['id_poliza', 'id_cliente', 'nombre_completo', 'rut', 'telefono', 'email', 'compañia', 'poliza', 'ramo', 'materia']].copy()
-        df_editable.columns = ['ID_Poliza', 'ID_Cliente', 'Nombre', 'RUT', 'Telefono', 'Email', 'Aseguradora', 'N° Poliza', 'Ramo', 'Riesgo / Patente']
-        
-        st.caption("✍️ **Edita directamente las celdas en blanco abajo y presiona Guardar:**")
-        edited_df = st.data_editor(
-            df_editable,
-            disabled=['ID_Poliza', 'ID_Cliente'],
-            hide_index=True,
-            use_container_width=True,
-            key=f"editor_{tipo_f}"
-        )
-        
-        if st.button("💾 Guardar Cambios Masivos en Aiven"):
-            try:
-                conn = get_connection()
-                cursor = conn.cursor()
-                
-                for _, row in edited_df.iterrows():
-                    # 1. Actualizar Cliente
-                    cursor.execute("""
-                        UPDATE clientes 
-                        SET nombre_completo = %s, rut = %s, telefono = %s, email = %s 
-                        WHERE id_cliente = %s;
-                    """, (row['Nombre'], row['RUT'], row['Telefono'], row['Email'], row['ID_Cliente']))
-                    
-                    # 2. Obtener / Crear Compañía
-                    comp_name = str(row['Aseguradora']).strip() or "GENERAL"
-                    cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_name,))
-                    r_c = cursor.fetchone()
-                    if r_c:
-                        id_co_act = r_c[0]
-                    else:
-                        cursor.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_name,))
-                        id_co_act = cursor.lastrowid
-
-                    # 3. Actualizar Póliza
-                    cursor.execute("""
-                        UPDATE polizas 
-                        SET numero_poliza = %s, id_compañia = %s, ramo = %s, materia_asegurada = %s 
-                        WHERE id_poliza = %s;
-                    """, (row['N° Poliza'], id_co_act, row['Ramo'], row['Riesgo / Patente'], row['ID_Poliza']))
-                
-                conn.commit()
-                cursor.close()
-                conn.close()
-                st.success("🎉 ¡Todos los datos editados han sido actualizados con éxito!")
-                st.rerun()
-            except Exception as err_m:
-                st.error(f"Error actualizando registros: {err_m}")
-    else:
-        st.success("✅ ¡Excelente! No hay registros incompletos para el filtro seleccionado.")
-
-    st.write("---")
 
 # ---------------------------------------------------------
 # SECCIÓN DE GRÁFICOS VISUALES
