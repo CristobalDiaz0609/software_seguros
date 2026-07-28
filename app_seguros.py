@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. CSS Personalizado
+# 2. CSS Personalizado (Look & Feel SaaS)
 st.markdown(
     """
     <style>
@@ -69,7 +69,7 @@ st.markdown(
 )
 
 
-# 3. Conexión a BD
+# 3. Conexión a BD en Aiven
 def get_connection():
     return mysql.connector.connect(
         host=st.secrets["mysql"]["host"],
@@ -80,7 +80,7 @@ def get_connection():
     )
 
 
-# Encabezado
+# Encabezado principal
 st.markdown(
     """
     <div class="header-container">
@@ -92,34 +92,88 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# BARRA DE HERRAMIENTAS (Sin RUT obligatorio)
+# MÓDULO DE IMPORTACIÓN DE EXCEL INTELIGENTE
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
 with col_acc1:
     with st.expander("📥 Subir Planilla Excel"):
-        st.caption(
-            "Columnas del Excel: **Nombre, Telefono, Email, Compañia, Poliza, Ramo, Vencimiento, Prima, Comision**"
-        )
+        st.caption("Carga tu archivo de cartera (.xlsx) en cualquier formato.")
         uploaded_file = st.file_uploader(
             "Selecciona tu archivo Excel (.xlsx)", type=["xlsx", "xls"]
         )
 
         if uploaded_file:
             try:
-                df_excel = pd.read_excel(uploaded_file)
-                df_excel.columns = df_excel.columns.astype(str).str.strip()
+                # 1. Leer primeras filas para encontrar la cabecera real
+                df_raw = pd.read_excel(uploaded_file)
 
-                st.write("🔍 **Vista previa de los datos:**")
-                st.dataframe(df_excel.head(3), use_container_width=True)
+                header_row = 0
+                if "Unnamed:" in str(df_raw.columns[0]):
+                    for idx in range(min(15, len(df_raw))):
+                        row_text = (
+                            " ".join(df_raw.iloc[idx].astype(str))
+                            .lower()
+                            .strip()
+                        )
+                        if any(
+                            k in row_text
+                            for k in [
+                                "compa",
+                                "corredor",
+                                "vigencia",
+                                "nombre",
+                                "cliente",
+                                "ren.",
+                            ]
+                        ):
+                            header_row = idx + 1
+                            break
+                    df_excel = pd.read_excel(uploaded_file, header=header_row)
+                else:
+                    df_excel = df_raw
 
-                if st.button("🚀 Confirmar e Importar Aiven"):
+                # Limpieza de filas vacías
+                df_excel = df_excel.dropna(how="all").reset_index(drop=True)
+
+                # 2. Mapeo dinámico de nombres de columnas
+                col_map = {}
+                for col in df_excel.columns:
+                    c_clean = str(col).strip().lower()
+                    if "compa" in c_clean:
+                        col_map[col] = "Compañia"
+                    elif (
+                        "vigencia" in c_clean
+                        or "venc" in c_clean
+                        or "ren." in c_clean
+                    ):
+                        col_map[col] = "Vencimiento"
+                    elif (
+                        "nombre" in c_clean
+                        or "cliente" in c_clean
+                        or "corredor" in c_clean
+                    ):
+                        col_map[col] = "Nombre"
+                    elif "prima" in c_clean:
+                        col_map[col] = "Prima"
+                    elif "comision" in c_clean or "comisi" in c_clean:
+                        col_map[col] = "Comision"
+                    elif "poliza" in c_clean or "póliza" in c_clean:
+                        col_map[col] = "Poliza"
+                    elif "ramo" in c_clean or "tipo" in c_clean:
+                        col_map[col] = "Ramo"
+
+                df_excel = df_excel.rename(columns=col_map)
+
+                st.write("🔍 **Vista previa procesada (Encabezados detectados):**")
+                st.dataframe(df_excel.head(5), use_container_width=True)
+
+                if st.button("🚀 Confirmar e Importar a Aiven"):
                     conn = get_connection()
                     cursor = conn.cursor()
                     registros_procesados = 0
 
                     for _, row in df_excel.iterrows():
-                        # Si viene RUT en la planilla se usa, si no, se guarda "SIN RUT"
                         rut_val = str(row.get("RUT", "SIN RUT")).strip()
                         nombre_val = str(
                             row.get("Nombre", "CLIENTE SIN NOMBRE")
@@ -139,42 +193,35 @@ with col_acc1:
                         except Exception:
                             venc_val = datetime.now().strftime("%Y-%m-%d")
 
-                        # Manejo de valores numéricos
+                        # Manejo numérico
                         try:
                             prima_val = float(row.get("Prima", 0))
-                        except ValueError:
+                        except (ValueError, TypeError):
                             prima_val = 0.0
 
                         try:
                             comision_val = float(row.get("Comision", 0))
-                        except ValueError:
+                        except (ValueError, TypeError):
                             comision_val = 0.0
 
-                        # 1. Insertar Cliente (sin depender exclusivamente del RUT)
-                        sql_cli = """
-                            INSERT INTO clientes (rut, nombre_completo, email, telefono)
-                            VALUES (%s, %s, %s, %s);
-                        """
+                        # Insertar Cliente
                         cursor.execute(
-                            sql_cli, (rut_val, nombre_val, email_val, tel_val)
+                            "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
+                            (rut_val, nombre_val, email_val, tel_val),
                         )
                         id_cliente = cursor.lastrowid
 
-                        # 2. Insertar Compañía
-                        sql_comp = """
-                            INSERT INTO compañias (nombre) VALUES (%s)
-                            ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);
-                        """
-                        cursor.execute(sql_comp, (comp_val,))
+                        # Insertar Compañía
+                        cursor.execute(
+                            "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
+                            (comp_val,),
+                        )
                         id_comp = cursor.lastrowid
 
-                        # 3. Insertar Póliza
-                        sql_pol = """
-                            INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                            VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
-                        """
+                        # Insertar Póliza
                         cursor.execute(
-                            sql_pol,
+                            """INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
+                               VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');""",
                             (
                                 poliza_val,
                                 id_cliente,
@@ -193,14 +240,14 @@ with col_acc1:
                     conn.close()
 
                     st.success(
-                        f"🎉 ¡Se procesaron y guardaron {registros_procesados} filas exitosamente!"
+                        f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente a Aiven!"
                     )
                     st.rerun()
 
             except Exception as e:
                 st.error(f"Error procesando el archivo Excel: {e}")
 
-# Módulo de creación manual (Sin pedir RUT)
+# Módulo de creación manual
 with col_acc2:
     with st.expander("➕ Crear Nuevo Cliente a Mano"):
         tipo_seguro = st.selectbox(
@@ -257,7 +304,6 @@ with col_acc2:
                     conn = get_connection()
                     cursor = conn.cursor()
 
-                    # Insertar Cliente sin exigir RUT
                     cursor.execute(
                         "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES ('SIN RUT', %s, %s, %s);",
                         (c_nombre, c_email, c_tel),
