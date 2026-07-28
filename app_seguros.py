@@ -110,22 +110,8 @@ def get_connection():
     )
 
 
-def deduplicate_columns(columns):
-    seen = {}
-    new_cols = []
-    for col in columns:
-        col_str = str(col).strip()
-        if col_str in seen:
-            seen[col_str] += 1
-            new_cols.append(f"{col_str}_{seen[col_str]}")
-        else:
-            seen[col_str] = 0
-            new_cols.append(col_str)
-    return new_cols
-
-
 def parse_custom_date(val):
-    if pd.isna(val) or str(val).lower() == "nan":
+    if pd.isna(val) or str(val).lower() in ["nan", "none", "null"]:
         return datetime.now().strftime("%Y-%m-%d")
     val_str = str(val).strip()
 
@@ -175,39 +161,49 @@ with col_acc1:
 
         if uploaded_file:
             try:
+                # Read entire sheet raw without headers
                 df_raw = pd.read_excel(uploaded_file, header=None)
 
-                # Búsqueda ESTRICTA del encabezado real (Riesgo Asegurado / RUT Asegurado)
+                # Search row by row for the exact column header row
                 header_idx = None
                 for idx, row in df_raw.iterrows():
-                    cells_as_str = [
-                        str(cell) for cell in row.values if pd.notna(cell)
+                    row_cells = [
+                        str(c).lower().strip()
+                        for c in row.values
+                        if pd.notna(c)
                     ]
-                    row_str = " ".join(cells_as_str).lower().strip()
+                    row_text = " ".join(row_cells)
 
+                    # Strict match: must contain "riesgo" or "rut asegurado" or "ramo"
                     if (
-                        "riesgo asegurado" in row_str
-                        or "rut asegurado" in row_str
-                        or ("ramo" in row_str and "nombre" in row_str)
+                        "riesgo" in row_text
+                        or "rut asegurado" in row_text
+                        or "ramo" in row_text
                     ):
                         header_idx = idx
                         break
 
                 if header_idx is not None:
-                    df_excel = pd.read_excel(uploaded_file, header=header_idx)
+                    # Set column names from the found header row and drop everything above it
+                    df_excel = df_raw.iloc[header_idx + 1 :].copy()
+                    df_excel.columns = df_raw.iloc[header_idx].values
                 else:
-                    df_excel = pd.read_excel(uploaded_file)
+                    df_excel = df_raw.copy()
 
-                df_excel.columns = deduplicate_columns(df_excel.columns)
+                # Clean column names
+                df_excel.columns = [
+                    str(c).strip() if pd.notna(c) else f"col_{i}"
+                    for i, c in enumerate(df_excel.columns)
+                ]
 
-                # MAPEO DIRECTO Y RIGUROSO
+                # Exact column mapping from your screenshot
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
 
                     if "riesgo" in c_clean:
                         col_map[col] = "Materia_Asegurada"
-                    elif "ramo" in c_clean or "tipo" in c_clean:
+                    elif "ramo" in c_clean:
                         col_map[col] = "Ramo"
                     elif "rut" in c_clean and "RUT" not in col_map.values():
                         col_map[col] = "RUT"
@@ -224,9 +220,9 @@ with col_acc1:
                     ) and "Poliza" not in col_map.values():
                         col_map[col] = "Poliza"
                     elif (
-                        "vigencia" in c_clean
-                        or "venc" in c_clean
+                        "venc" in c_clean
                         or "ren." in c_clean
+                        or "vigencia" in c_clean
                     ) and "Vencimiento" not in col_map.values():
                         col_map[col] = "Vencimiento"
                     elif (
@@ -247,20 +243,20 @@ with col_acc1:
                         col_map[col] = "Email"
 
                 df_excel = df_excel.rename(columns=col_map)
-                df_excel.columns = deduplicate_columns(df_excel.columns)
 
+                # Remove non-data rows
                 if "Nombre" in df_excel.columns:
                     df_excel = df_excel[
                         df_excel["Nombre"].notna()
                         & ~df_excel["Nombre"]
                         .astype(str)
                         .str.contains(
-                            "Ventas|Total|Nombre", case=False, na=False
+                            "Ventas|Total|Nombre|Asegurado", case=False, na=False
                         )
                     ]
 
                 st.success(
-                    f"📊 **Planilla lista:** Se detectaron **{len(df_excel)} registros** válidos para importar."
+                    f"📊 **Planilla detectada correctamente:** {len(df_excel)} registros listos para importar."
                 )
                 st.dataframe(df_excel.head(10), use_container_width=True)
 
@@ -372,7 +368,7 @@ with col_acc1:
                     conn.close()
 
                     st.success(
-                        f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente a Aiven!"
+                        f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente!"
                     )
                     st.rerun()
 
@@ -612,7 +608,7 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE CON RIESGO ASEGURADO MOSTRADO
+# LISTADO DESPLEGABLE MOSTRANDO RIESGO ASEGURADO REAL
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
