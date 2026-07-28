@@ -92,14 +92,14 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN ROBUSTO
+# BARRA DE HERRAMIENTAS (Sin RUT obligatorio)
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
 with col_acc1:
     with st.expander("📥 Subir Planilla Excel"):
         st.caption(
-            "Columnas sugeridas: RUT, Nombre, Telefono, Email, Compañia, Poliza, Ramo, Vencimiento, Prima, Comision"
+            "Columnas del Excel: **Nombre, Telefono, Email, Compañia, Poliza, Ramo, Vencimiento, Prima, Comision**"
         )
         uploaded_file = st.file_uploader(
             "Selecciona tu archivo Excel (.xlsx)", type=["xlsx", "xls"]
@@ -108,8 +108,6 @@ with col_acc1:
         if uploaded_file:
             try:
                 df_excel = pd.read_excel(uploaded_file)
-
-                # Limpieza previa de nombres de columnas
                 df_excel.columns = df_excel.columns.astype(str).str.strip()
 
                 st.write("🔍 **Vista previa de los datos:**")
@@ -121,8 +119,8 @@ with col_acc1:
                     registros_procesados = 0
 
                     for _, row in df_excel.iterrows():
-                        # Extraer campos con valores seguros por defecto
-                        rut_val = str(row.get("RUT", "S/RUT")).strip()
+                        # Si viene RUT en la planilla se usa, si no, se guarda "SIN RUT"
+                        rut_val = str(row.get("RUT", "SIN RUT")).strip()
                         nombre_val = str(
                             row.get("Nombre", "CLIENTE SIN NOMBRE")
                         ).strip()
@@ -141,7 +139,7 @@ with col_acc1:
                         except Exception:
                             venc_val = datetime.now().strftime("%Y-%m-%d")
 
-                        # Manejo seguro de números
+                        # Manejo de valores numéricos
                         try:
                             prima_val = float(row.get("Prima", 0))
                         except ValueError:
@@ -152,11 +150,10 @@ with col_acc1:
                         except ValueError:
                             comision_val = 0.0
 
-                        # 1. Insertar Cliente
+                        # 1. Insertar Cliente (sin depender exclusivamente del RUT)
                         sql_cli = """
                             INSERT INTO clientes (rut, nombre_completo, email, telefono)
-                            VALUES (%s, %s, %s, %s)
-                            ON DUPLICATE KEY UPDATE id_cliente=LAST_INSERT_ID(id_cliente);
+                            VALUES (%s, %s, %s, %s);
                         """
                         cursor.execute(
                             sql_cli, (rut_val, nombre_val, email_val, tel_val)
@@ -196,14 +193,14 @@ with col_acc1:
                     conn.close()
 
                     st.success(
-                        f"🎉 ¡Se procesaron y guardaron {registros_procesados} filas exitosamente en Aiven!"
+                        f"🎉 ¡Se procesaron y guardaron {registros_procesados} filas exitosamente!"
                     )
                     st.rerun()
 
             except Exception as e:
                 st.error(f"Error procesando el archivo Excel: {e}")
 
-# Módulo de creación manual
+# Módulo de creación manual (Sin pedir RUT)
 with col_acc2:
     with st.expander("➕ Crear Nuevo Cliente a Mano"):
         tipo_seguro = st.selectbox(
@@ -217,9 +214,10 @@ with col_acc2:
         )
 
         with st.form("form_nuevo_cliente"):
-            c_rut = st.text_input("RUT", placeholder="12345678-9")
-            c_nombre = st.text_input("Nombre Completo")
-            c_tel = st.text_input("Teléfono")
+            c_nombre = st.text_input(
+                "Nombre Completo del Cliente", placeholder="Ej: Juan Pérez Soto"
+            )
+            c_tel = st.text_input("Teléfono de Contacto")
             c_email = st.text_input("Correo Electrónico")
 
             p_comp = st.text_input("Aseguradora", placeholder="SURA")
@@ -254,14 +252,15 @@ with col_acc2:
 
             btn_guardar = st.form_submit_button("Guardar en Sistema")
 
-            if btn_guardar and c_rut and c_nombre:
+            if btn_guardar and c_nombre:
                 try:
                     conn = get_connection()
                     cursor = conn.cursor()
 
+                    # Insertar Cliente sin exigir RUT
                     cursor.execute(
-                        "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s) ON DUPLICATE KEY UPDATE id_cliente=LAST_INSERT_ID(id_cliente);",
-                        (c_rut, c_nombre, c_email, c_tel),
+                        "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES ('SIN RUT', %s, %s, %s);",
+                        (c_nombre, c_email, c_tel),
                     )
                     id_c = cursor.lastrowid
 
