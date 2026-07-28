@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. INYECCIÓN DE CSS PERSONALIZADO
+# 2. CSS Personalizado
 st.markdown(
     """
     <style>
@@ -30,24 +30,10 @@ st.markdown(
         padding: 20px;
         border-radius: 10px;
         margin-bottom: 20px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
     }
-    .header-title {
-        font-size: 24px;
-        font-weight: 700;
-        margin: 0;
-    }
-    .header-subtitle {
-        font-size: 12px;
-        color: #a0aec0;
-        margin-top: -5px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
+    .header-title { font-size: 24px; font-weight: 700; margin: 0; }
+    .header-subtitle { font-size: 12px; color: #a0aec0; margin-top: -5px; text-transform: uppercase; letter-spacing: 1px; }
 
-    /* Tarjetas de Métricas */
     .metric-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -56,22 +42,11 @@ st.markdown(
         text-align: left;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    .metric-value {
-        font-size: 26px;
-        font-weight: 700;
-        color: #1a202c;
-        margin-bottom: -5px;
-    }
+    .metric-value { font-size: 26px; font-weight: 700; color: #1a202c; margin-bottom: -5px; }
     .metric-value.green { color: #2f855a; }
     .metric-value.red { color: #c53030; }
-    .metric-label {
-        font-size: 11px;
-        color: #718096;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
+    .metric-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; }
 
-    /* Tarjetas de Lista */
     .client-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -84,38 +59,17 @@ st.markdown(
         align-items: center;
         box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     }
-    .client-name {
-        font-size: 16px;
-        font-weight: 700;
-        color: #1a202c;
-        margin: 0 0 4px 0;
-    }
-    .client-details {
-        font-size: 13px;
-        color: #718096;
-        margin: 0 0 6px 0;
-    }
-    .client-price {
-        font-size: 13px;
-        font-weight: 600;
-        color: #2d3748;
-        margin: 0;
-    }
-    .badge-vencida {
-        background-color: #c53030;
-        color: white;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-    }
+    .client-name { font-size: 16px; font-weight: 700; color: #1a202c; margin: 0 0 4px 0; }
+    .client-details { font-size: 13px; color: #718096; margin: 0 0 6px 0; }
+    .client-price { font-size: 13px; font-weight: 600; color: #2d3748; margin: 0; }
+    .badge-vencida { background-color: #c53030; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-# 3. CONEXIÓN A BASE DE DATOS
+# 3. Conexión a BD
 def get_connection():
     return mysql.connector.connect(
         host=st.secrets["mysql"]["host"],
@@ -130,95 +84,130 @@ def get_connection():
 st.markdown(
     """
     <div class="header-container">
-        <div>
-            <p class="header-title">Cartera de Clientes</p>
-            <p class="header-subtitle">SEGUROS · INDEPENDIENTE</p>
-        </div>
+        <p class="header-title">Cartera de Clientes</p>
+        <p class="header-subtitle">SEGUROS · INDEPENDIENTE</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------
-# BARRA DE HERRAMIENTAS (Acciones rápidas)
+# MÓDULO DE IMPORTACIÓN ROBUSTO
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
 with col_acc1:
-    with st.expander("📥 Subir Excel de Clientes / Pólizas"):
-        st.write(
-            "El archivo Excel debe contener las columnas: **RUT, Nombre, Telefono, Email, Compañia, Poliza, Ramo, Vencimiento, Prima, Comision**"
+    with st.expander("📥 Subir Planilla Excel"):
+        st.caption(
+            "Columnas sugeridas: RUT, Nombre, Telefono, Email, Compañia, Poliza, Ramo, Vencimiento, Prima, Comision"
         )
         uploaded_file = st.file_uploader(
-            "Selecciona tu archivo Excel", type=["xlsx", "xls"]
+            "Selecciona tu archivo Excel (.xlsx)", type=["xlsx", "xls"]
         )
 
-        if uploaded_file and st.button("Procesar e Importar"):
+        if uploaded_file:
             try:
                 df_excel = pd.read_excel(uploaded_file)
-                conn = get_connection()
-                cursor = conn.cursor()
 
-                for _, row in df_excel.iterrows():
-                    # 1. Insertar o actualizar cliente
-                    sql_cli = """
-                        INSERT INTO clientes (rut, nombre_completo, email, telefono)
-                        VALUES (%s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE id_cliente=LAST_INSERT_ID(id_cliente);
-                    """
-                    cursor.execute(
-                        sql_cli,
-                        (
-                            str(row.get("RUT", "")),
-                            str(row.get("Nombre", "")),
-                            str(row.get("Email", "")),
-                            str(row.get("Telefono", "")),
-                        ),
+                # Limpieza previa de nombres de columnas
+                df_excel.columns = df_excel.columns.astype(str).str.strip()
+
+                st.write("🔍 **Vista previa de los datos:**")
+                st.dataframe(df_excel.head(3), use_container_width=True)
+
+                if st.button("🚀 Confirmar e Importar Aiven"):
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    registros_procesados = 0
+
+                    for _, row in df_excel.iterrows():
+                        # Extraer campos con valores seguros por defecto
+                        rut_val = str(row.get("RUT", "S/RUT")).strip()
+                        nombre_val = str(
+                            row.get("Nombre", "CLIENTE SIN NOMBRE")
+                        ).strip()
+                        tel_val = str(row.get("Telefono", "")).strip()
+                        email_val = str(row.get("Email", "")).strip()
+                        comp_val = str(row.get("Compañia", "GENERAL")).strip()
+                        poliza_val = str(row.get("Poliza", "S/N")).strip()
+                        ramo_val = str(row.get("Ramo", "General")).strip()
+
+                        # Manejo seguro de fechas
+                        raw_venc = row.get("Vencimiento")
+                        try:
+                            venc_val = pd.to_datetime(raw_venc).strftime(
+                                "%Y-%m-%d"
+                            )
+                        except Exception:
+                            venc_val = datetime.now().strftime("%Y-%m-%d")
+
+                        # Manejo seguro de números
+                        try:
+                            prima_val = float(row.get("Prima", 0))
+                        except ValueError:
+                            prima_val = 0.0
+
+                        try:
+                            comision_val = float(row.get("Comision", 0))
+                        except ValueError:
+                            comision_val = 0.0
+
+                        # 1. Insertar Cliente
+                        sql_cli = """
+                            INSERT INTO clientes (rut, nombre_completo, email, telefono)
+                            VALUES (%s, %s, %s, %s)
+                            ON DUPLICATE KEY UPDATE id_cliente=LAST_INSERT_ID(id_cliente);
+                        """
+                        cursor.execute(
+                            sql_cli, (rut_val, nombre_val, email_val, tel_val)
+                        )
+                        id_cliente = cursor.lastrowid
+
+                        # 2. Insertar Compañía
+                        sql_comp = """
+                            INSERT INTO compañias (nombre) VALUES (%s)
+                            ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);
+                        """
+                        cursor.execute(sql_comp, (comp_val,))
+                        id_comp = cursor.lastrowid
+
+                        # 3. Insertar Póliza
+                        sql_pol = """
+                            INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
+                            VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
+                        """
+                        cursor.execute(
+                            sql_pol,
+                            (
+                                poliza_val,
+                                id_cliente,
+                                id_comp,
+                                ramo_val,
+                                venc_val,
+                                prima_val,
+                                comision_val,
+                            ),
+                        )
+
+                        registros_procesados += 1
+
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+
+                    st.success(
+                        f"🎉 ¡Se procesaron y guardaron {registros_procesados} filas exitosamente en Aiven!"
                     )
-                    id_cliente = cursor.lastrowid
+                    st.rerun()
 
-                    # 2. Insertar compañía
-                    sql_comp = """
-                        INSERT INTO compañias (nombre) VALUES (%s)
-                        ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);
-                    """
-                    cursor.execute(
-                        sql_comp, (str(row.get("Compañia", "OTRA")),)
-                    )
-                    id_comp = cursor.lastrowid
-
-                    # 3. Insertar póliza
-                    sql_pol = """
-                        INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                        VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
-                    """
-                    cursor.execute(
-                        sql_pol,
-                        (
-                            str(row.get("Poliza", "SN")),
-                            id_cliente,
-                            id_comp,
-                            str(row.get("Ramo", "General")),
-                            row.get("Vencimiento"),
-                            float(row.get("Prima", 0)),
-                            float(row.get("Comision", 0)),
-                        ),
-                    )
-
-                conn.commit()
-                cursor.close()
-                conn.close()
-                st.success("¡Datos importados con éxito a Aiven!")
-                st.rerun()
             except Exception as e:
-                st.error(f"Error al importar: {e}")
+                st.error(f"Error procesando el archivo Excel: {e}")
 
-# FORMULARIO DINÁMICO SEGÚN TIPO DE SEGURO
+# Módulo de creación manual
 with col_acc2:
     with st.expander("➕ Crear Nuevo Cliente a Mano"):
-        # Selección previa del tipo de seguro (Ramo)
         tipo_seguro = st.selectbox(
-            "Selecciona el Tipo de Seguro (Ramo):",
+            "Tipo de Seguro (Ramo):",
             [
                 "🚗 Auto / Vehículo",
                 "🏠 Vivienda / Hogar",
@@ -227,84 +216,65 @@ with col_acc2:
             ],
         )
 
-        with st.form("form_nuevo_cliente_dinamico"):
-            st.subheader("👤 Datos del Cliente")
+        with st.form("form_nuevo_cliente"):
             c_rut = st.text_input("RUT", placeholder="12345678-9")
             c_nombre = st.text_input("Nombre Completo")
             c_tel = st.text_input("Teléfono")
             c_email = st.text_input("Correo Electrónico")
 
-            st.subheader("📜 Datos de la Póliza")
-            p_comp = st.text_input("Aseguradora (Compañía)", placeholder="SURA")
+            p_comp = st.text_input("Aseguradora", placeholder="SURA")
             p_poliza = st.text_input("N° de Póliza")
             p_venc = st.date_input("Fecha Vencimiento")
             p_prima = st.number_input("Monto Prima", min_value=0.0)
             p_comision = st.number_input("Monto Comisión", min_value=0.0)
 
-            # Campos dinámicos según la selección
             materia_especifica = ""
             if "Auto" in tipo_seguro:
-                st.subheader("🚗 Especificación del Vehículo")
-                patente = st.text_input(
-                    "Patente del Vehículo", placeholder="AA1234"
-                )
+                patente = st.text_input("Patente", placeholder="AA1234")
                 modelo = st.text_input(
-                    "Marca / Modelo / Año", placeholder="Toyota RAV4 2022"
+                    "Modelo / Año", placeholder="Toyota RAV4 2022"
                 )
                 materia_especifica = f"Patente: {patente.upper()} - {modelo}"
-
             elif "Vivienda" in tipo_seguro:
-                st.subheader("🏠 Especificación de la Vivienda")
                 direccion_prop = st.text_input(
-                    "Dirección de la Propiedad",
+                    "Dirección Propiedad",
                     placeholder="Av. Providencia 1234, Dpto 502",
                 )
                 materia_especifica = f"Propiedad: {direccion_prop}"
-
             elif "Salud" in tipo_seguro:
-                st.subheader("🏥 Especificación de Salud / Vida")
                 cargas = st.text_input(
                     "Cargas / Beneficiarios",
                     placeholder="Ej: Cónyuge + 2 Hijos",
                 )
                 materia_especifica = f"Cobertura: {cargas}"
-
             else:
                 materia_especifica = st.text_input(
                     "Materia Asegurada", placeholder="Descripción general"
                 )
 
-            btn_guardar = st.form_submit_button("Guardar Cliente y Póliza")
+            btn_guardar = st.form_submit_button("Guardar en Sistema")
 
             if btn_guardar and c_rut and c_nombre:
                 try:
                     conn = get_connection()
                     cursor = conn.cursor()
 
-                    # Insertar Cliente
                     cursor.execute(
-                        """INSERT INTO clientes (rut, nombre_completo, email, telefono) 
-                           VALUES (%s, %s, %s, %s) 
-                           ON DUPLICATE KEY UPDATE id_cliente=LAST_INSERT_ID(id_cliente);""",
+                        "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s) ON DUPLICATE KEY UPDATE id_cliente=LAST_INSERT_ID(id_cliente);",
                         (c_rut, c_nombre, c_email, c_tel),
                     )
                     id_c = cursor.lastrowid
 
-                    # Insertar Compañía
                     cursor.execute(
-                        """INSERT INTO compañias (nombre) VALUES (%s) 
-                           ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);""",
+                        "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
                         (p_comp or "GENERAL",),
                     )
                     id_co = cursor.lastrowid
 
-                    # Extraer nombre limpio del ramo
                     ramo_nombre = tipo_seguro.split(" ")[1]
 
-                    # Insertar Póliza guardando los detalles en 'materia_asegurada'
                     cursor.execute(
-                        """INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado) 
-                           VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vigente');""",
+                        "INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vigente');",
                         (
                             p_poliza or "S/N",
                             id_c,
@@ -320,9 +290,7 @@ with col_acc2:
                     conn.commit()
                     cursor.close()
                     conn.close()
-                    st.success(
-                        f"¡Cliente **{c_nombre}** y seguro de **{ramo_nombre}** guardados con éxito!"
-                    )
+                    st.success(f"¡Cliente **{c_nombre}** guardado con éxito!")
                     st.rerun()
                 except Exception as err:
                     st.error(f"Error al guardar: {err}")
@@ -352,7 +320,7 @@ with col_f5:
 st.write("")
 
 # ---------------------------------------------------------
-# CONSULTA DE COMISIONES MES ACTUAL VS MES ANTERIOR
+# CÁLCULOS Y LISTADO DE CLIENTES
 # ---------------------------------------------------------
 total_comision_mes_actual = 0.0
 total_comision_mes_anterior = 0.0
@@ -361,10 +329,8 @@ variacion_comision = 0.0
 try:
     conn = get_connection()
 
-    # Cálculo dinámico de fechas
     hoy = datetime.now()
     primer_dia_mes_actual = hoy.replace(day=1).strftime("%Y-%m-%d")
-
     ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime(
         "%Y-%m-%d"
     )
@@ -374,7 +340,6 @@ try:
         .strftime("%Y-%m-%d")
     )
 
-    # 1. Query general para el listado (incluyendo materia_asegurada)
     query_base = """
         SELECT 
             c.nombre_completo,
@@ -399,20 +364,8 @@ try:
 
     df = pd.read_sql(query_base, conn)
 
-    # 2. Queries para KPIs comparativos
-    query_mes_actual = f"""
-        SELECT COALESCE(SUM(monto_comision), 0) as total 
-        FROM polizas 
-        WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' 
-          AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');
-    """
-
-    query_mes_anterior = f"""
-        SELECT COALESCE(SUM(monto_comision), 0) as total 
-        FROM polizas 
-        WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' 
-          AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';
-    """
+    query_mes_actual = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');"
+    query_mes_anterior = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';"
 
     df_actual = pd.read_sql(query_mes_actual, conn)
     df_anterior = pd.read_sql(query_mes_anterior, conn)
@@ -427,41 +380,24 @@ try:
 except Exception as e:
     df = pd.DataFrame()
 
-# ---------------------------------------------------------
-# TARJETAS DE MÉTRICAS (KPIs COMPARATIVOS)
-# ---------------------------------------------------------
+# Tarjetas Métricas
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 
 with col_m1:
     st.markdown(
-        """
-        <div class="metric-card">
-            <p class="metric-value">—</p>
-            <p class="metric-label">CLIENTES</p>
-        </div>
-        """,
+        """<div class="metric-card"><p class="metric-value">—</p><p class="metric-label">CLIENTES</p></div>""",
         unsafe_allow_html=True,
     )
 
 with col_m2:
     st.markdown(
-        f"""
-        <div class="metric-card">
-            <p class="metric-value green">${total_comision_mes_actual:,.2f}</p>
-            <p class="metric-label">COMISIÓN ESTE MES</p>
-        </div>
-        """,
+        f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""",
         unsafe_allow_html=True,
     )
 
 with col_m3:
     st.markdown(
-        f"""
-        <div class="metric-card">
-            <p class="metric-value">${total_comision_mes_anterior:,.2f}</p>
-            <p class="metric-label">COMISIÓN MES ANTERIOR</p>
-        </div>
-        """,
+        f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""",
         unsafe_allow_html=True,
     )
 
@@ -469,21 +405,14 @@ with col_m4:
     color_var = "green" if variacion_comision >= 0 else "red"
     signo = "+" if variacion_comision >= 0 else ""
     st.markdown(
-        f"""
-        <div class="metric-card">
-            <p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p>
-            <p class="metric-label">DIFERENCIA MENSUAL</p>
-        </div>
-        """,
+        f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""",
         unsafe_allow_html=True,
     )
 
 st.write("")
 st.write("")
 
-# ---------------------------------------------------------
-# LISTADO CON DETALLE DINÁMICO
-# ---------------------------------------------------------
+# Renderizado del listado
 if not df.empty:
     for idx, row in df.iterrows():
         nombre = str(row["nombre_completo"]).upper()
@@ -495,7 +424,6 @@ if not df.empty:
         comision_real = row["comision"]
         moneda = row["moneda"]
 
-        # Mostrar la materia asegurada si existe (Patente, Dirección, Cargas)
         detalle_materia = f" ({materia})" if materia else ""
 
         html_card = f"""
@@ -513,5 +441,5 @@ if not df.empty:
         st.markdown(html_card, unsafe_allow_html=True)
 else:
     st.info(
-        "No se encontraron registros. Usa los módulos de arriba para subir tu Excel o ingresar un cliente a mano."
+        "No hay registros. Sube una planilla Excel o ingresa un cliente a mano para comenzar."
     )
