@@ -347,7 +347,7 @@ with col_acc1:
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Ingresada');
                             """,
                             (poliza_val, id_cliente, id_comp, ramo_val, materia_val, venc_val, prima_val, comision_val)
                         )
@@ -453,7 +453,6 @@ with tab_kpis:
         ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
         primer_dia_mes_anterior = ((hoy.replace(day=1) - timedelta(days=1)).replace(day=1)).strftime("%Y-%m-%d")
 
-        # Cómputos globales
         df_totales = pd.read_sql("SELECT COUNT(DISTINCT id_cliente) as tot_cli, COUNT(id_poliza) as tot_pol FROM polizas;", conn)
         total_clientes_gen = int(df_totales["tot_cli"].iloc[0])
         total_polizas_gen = int(df_totales["tot_pol"].iloc[0])
@@ -461,7 +460,6 @@ with tab_kpis:
         df_actual = pd.read_sql(f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');", conn)
         df_anterior = pd.read_sql(f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';", conn)
         
-        # Cargar base completa para los gráficos globales
         df_global = pd.read_sql("""
             SELECT p.id_poliza, COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia, COALESCE(p.ramo, 'General') as ramo 
             FROM polizas p LEFT JOIN compañias co ON p.id_compañia = co.id_compañia;
@@ -475,7 +473,6 @@ with tab_kpis:
     except Exception:
         df_global = pd.DataFrame()
 
-    # TARJETAS DE KPIS
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
         st.markdown(f"""<div class="metric-card"><p class="metric-value">{total_clientes_gen}</p><p class="metric-label">CLIENTES TOTALES</p></div>""", unsafe_allow_html=True)
@@ -493,7 +490,6 @@ with tab_kpis:
     st.write("")
     st.write("---")
 
-    # GRÁFICOS VISUALES
     if not df_global.empty:
         col_g1, col_g2 = st.columns(2)
 
@@ -518,11 +514,11 @@ with tab_kpis:
 
 
 # ---------------------------------------------------------
-# HOJA 2: BÚSQUEDA Y GESTIÓN DE CARTERA
+# HOJA 2: BÚSQUEDA Y GESTIÓN DE CARTERA (FILTROS DE FECHA RIGUROSOS)
 # ---------------------------------------------------------
 with tab_search:
     st.markdown("### 🔍 Módulo de Búsqueda y Gestión Directa")
-    st.caption("Encuentra pólizas rápidamente, filtra por vencimiento y realiza acciones por WhatsApp o Correo.")
+    st.caption("Encuentra pólizas rápidamente, filtra por su fecha de vencimiento real y realiza acciones por WhatsApp o Correo.")
     st.write("")
 
     busqueda = st.text_input(
@@ -549,6 +545,7 @@ with tab_search:
     try:
         conn = get_connection()
         hoy = datetime.now()
+        hoy_str = hoy.strftime("%Y-%m-%d")
 
         query_base = """
             SELECT 
@@ -576,16 +573,17 @@ with tab_search:
         if busqueda:
             query_base += f" AND (c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%' OR p.materia_asegurada LIKE '%{busqueda}%')"
 
+        # FILTROS ESTRICTOS BASADOS 100% EN LA FECHA DE VENCIMIENTO REAL
         if filtro_seleccionado == "Vencidas":
-            query_base += f" AND (p.fecha_vencimiento < '{hoy.strftime('%Y-%m-%d')}' OR p.estado = 'Vencida')"
+            query_base += f" AND p.fecha_vencimiento < '{hoy_str}'"
         elif filtro_seleccionado == "Vence ≤15 días":
             fecha_15 = (hoy + timedelta(days=15)).strftime("%Y-%m-%d")
-            query_base += f" AND p.fecha_vencimiento BETWEEN '{hoy.strftime('%Y-%m-%d')}' AND '{fecha_15}'"
+            query_base += f" AND p.fecha_vencimiento BETWEEN '{hoy_str}' AND '{fecha_15}'"
         elif filtro_seleccionado == "Vence ≤30 días":
             fecha_30 = (hoy + timedelta(days=30)).strftime("%Y-%m-%d")
-            query_base += f" AND p.fecha_vencimiento BETWEEN '{hoy.strftime('%Y-%m-%d')}' AND '{fecha_30}'"
+            query_base += f" AND p.fecha_vencimiento BETWEEN '{hoy_str}' AND '{fecha_30}'"
         elif filtro_seleccionado == "Al día / Vigente":
-            query_base += f" AND p.fecha_vencimiento >= '{hoy.strftime('%Y-%m-%d')}'"
+            query_base += f" AND p.fecha_vencimiento >= '{hoy_str}'"
 
         query_base += " ORDER BY p.fecha_vencimiento ASC;"
 
@@ -694,7 +692,7 @@ with tab_search:
                             st.error(f"Error al actualizar la póliza: {err}")
                 st.markdown("</div>", unsafe_allow_html=True)
     else:
-        st.info("No se encontraron clientes o pólizas con el filtro de búsqueda ingresado.")
+        st.info("No se encontraron clientes o pólizas que coincidan exactamente con la búsqueda.")
 
 
 # ---------------------------------------------------------
