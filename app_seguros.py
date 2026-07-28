@@ -1,8 +1,9 @@
+from datetime import datetime, timedelta
 import mysql.connector
 import pandas as pd
 import streamlit as st
 
-# 1. Configuración de página
+# 1. Configuración de página (Ocultar Sidebar por defecto)
 st.set_page_config(
     page_title="Cartera de Clientes & Comisiones",
     page_icon="🛡️",
@@ -10,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. INYECCIÓN DE CSS PERSONALIZADO
+# 2. INYECCIÓN DE CSS PERSONALIZADO (Look & Feel SaaS)
 st.markdown(
     """
     <style>
@@ -46,7 +47,7 @@ st.markdown(
         letter-spacing: 1px;
     }
 
-    /* Tarjetas de Resumen */
+    /* Tarjetas de Métricas Financieras */
     .metric-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -70,7 +71,7 @@ st.markdown(
         letter-spacing: 0.5px;
     }
 
-    /* Tarjetas de Lista */
+    /* Tarjetas de Lista de Clientes */
     .client-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -186,7 +187,7 @@ with col_acc1:
                     )
                     id_comp = cursor.lastrowid
 
-                    # 3. Insertar póliza con comisión leída del Excel
+                    # 3. Insertar póliza con comisión leída directamente del Excel
                     sql_pol = """
                         INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
                         VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
@@ -220,6 +221,9 @@ with col_acc2:
             f_tel = st.text_input("Teléfono")
             f_comp = st.text_input("Aseguradora (Compañía)", placeholder="SURA")
             f_poliza = st.text_input("N° de Póliza")
+            f_ramo = st.text_input(
+                "Ramo / Tipo Seguro", placeholder="Vehículos"
+            )
             f_venc = st.date_input("Fecha Vencimiento")
             f_prima = st.number_input("Monto Prima", min_value=0.0)
             f_comision = st.number_input(
@@ -250,11 +254,12 @@ with col_acc2:
                     # Insertar Póliza
                     cursor.execute(
                         """INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado) 
-                           VALUES (%s, %s, %s, 'General', CURRENT_DATE, %s, %s, %s, 'Vigente');""",
+                           VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vigente');""",
                         (
                             f_poliza or "S/N",
                             id_c,
                             id_co,
+                            f_ramo or "General",
                             f_venc,
                             f_prima,
                             f_comision,
@@ -294,15 +299,30 @@ with col_f5:
 st.write("")
 
 # ---------------------------------------------------------
-# CONSULTA DE COMISIONES DIRECTAS
+# CONSULTA DE COMISIONES MES ACTUAL VS MES ANTERIOR
 # ---------------------------------------------------------
-total_comision_cartera = 0.0
-total_comision_vencida = 0.0
-pólizas_vencidas_cnt = 0
+total_comision_mes_actual = 0.0
+total_comision_mes_anterior = 0.0
+variacion_comision = 0.0
 
 try:
     conn = get_connection()
-    query = """
+
+    # Cálculo dinámico de fechas
+    hoy = datetime.now()
+    primer_dia_mes_actual = hoy.replace(day=1).strftime("%Y-%m-%d")
+
+    ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
+    primer_dia_mes_anterior = (
+        (hoy.replace(day=1) - timedelta(days=1))
+        .replace(day=1)
+        .strftime("%Y-%m-%d")
+    )
+
+    # 1. Query general para el listado
+    query_base = """
         SELECT 
             c.nombre_completo,
             COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia,
@@ -318,24 +338,42 @@ try:
     """
 
     if busqueda:
-        query += f" WHERE c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%'"
+        query_base += f" WHERE c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%'"
 
-    query += " ORDER BY p.fecha_vencimiento ASC;"
+    query_base += " ORDER BY p.fecha_vencimiento ASC;"
 
-    df = pd.read_sql(query, conn)
+    df = pd.read_sql(query_base, conn)
+
+    # 2. Queries específicas para los KPIs comparativos
+    query_mes_actual = f"""
+        SELECT COALESCE(SUM(monto_comision), 0) as total 
+        FROM polizas 
+        WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' 
+          AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');
+    """
+
+    query_mes_anterior = f"""
+        SELECT COALESCE(SUM(monto_comision), 0) as total 
+        FROM polizas 
+        WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' 
+          AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';
+    """
+
+    df_actual = pd.read_sql(query_mes_actual, conn)
+    df_anterior = pd.read_sql(query_mes_anterior, conn)
     conn.close()
 
-    if not df.empty:
-        total_comision_cartera = df["comision"].sum()
-        df_vencidas = df[df["estado"] == "Vencida"]
-        total_comision_vencida = df_vencidas["comision"].sum()
-        pólizas_vencidas_cnt = len(df_vencidas)
+    total_comision_mes_actual = float(df_actual["total"].iloc[0])
+    total_comision_mes_anterior = float(df_anterior["total"].iloc[0])
+    variacion_comision = (
+        total_comision_mes_actual - total_comision_mes_anterior
+    )
 
 except Exception as e:
     df = pd.DataFrame()
 
 # ---------------------------------------------------------
-# TARJETAS DE MÉTRICAS (Comisión leída directamente)
+# TARJETAS DE MÉTRICAS (KPIs COMPARATIVOS)
 # ---------------------------------------------------------
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 
@@ -354,8 +392,8 @@ with col_m2:
     st.markdown(
         f"""
         <div class="metric-card">
-            <p class="metric-value green">${total_comision_cartera:,.2f}</p>
-            <p class="metric-label">COMISIÓN CARTERA</p>
+            <p class="metric-value green">${total_comision_mes_actual:,.2f}</p>
+            <p class="metric-label">COMISIÓN ESTE MES</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -365,19 +403,21 @@ with col_m3:
     st.markdown(
         f"""
         <div class="metric-card">
-            <p class="metric-value red">${total_comision_vencida:,.2f}</p>
-            <p class="metric-label">COMISIÓN EN RIESGO</p>
+            <p class="metric-value">${total_comision_mes_anterior:,.2f}</p>
+            <p class="metric-label">COMISIÓN MES ANTERIOR</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 with col_m4:
+    color_var = "green" if variacion_comision >= 0 else "red"
+    signo = "+" if variacion_comision >= 0 else ""
     st.markdown(
         f"""
         <div class="metric-card">
-            <p class="metric-value red">{pólizas_vencidas_cnt}</p>
-            <p class="metric-label">PÓLIZAS VENCIDAS</p>
+            <p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p>
+            <p class="metric-label">DIFERENCIA MENSUAL</p>
         </div>
         """,
         unsafe_allow_html=True,
