@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
 import re
+from datetime import datetime, timedelta
 import mysql.connector
 import pandas as pd
 import streamlit as st
@@ -36,7 +36,6 @@ st.markdown(
     .header-title { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
     .header-subtitle { font-size: 12px; color: #cbd5e0; margin-top: -3px; text-transform: uppercase; letter-spacing: 1.5px; }
 
-    /* Tarjetas Métricas */
     .metric-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -50,7 +49,6 @@ st.markdown(
     .metric-value.red { color: #9b2c2c; }
     .metric-label { font-size: 11px; color: #718096; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
 
-    /* Estilos Ficha de Edición */
     .edit-box {
         background-color: #f8fafc;
         border-left: 5px solid #2b6cb0;
@@ -187,13 +185,14 @@ with col_acc1:
 
                 df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # MAPEO ACTUALIZADO PARA LEER 'RIESGO' COMO MATERIA ASEGURADA
+                # MAPEO REFORZADO: 'RIESGO ASEGURADO' -> Materia_Asegurada
                 col_map = {}
                 for col in df_excel.columns:
-                    c_clean = str(col).lower()
+                    c_clean = str(col).lower().strip()
                     if (
                         "asegurado" in c_clean
                         and "rut" not in c_clean
+                        and "riesgo" not in c_clean
                         and "Nombre" not in col_map.values()
                     ):
                         col_map[col] = "Nombre"
@@ -218,10 +217,10 @@ with col_acc1:
                         or "ren." in c_clean
                     ) and "Vencimiento" not in col_map.values():
                         col_map[col] = "Vencimiento"
-                    elif "riesgo" in c_clean:
-                        col_map[col] = "Materia"
-                        if "Ramo" not in col_map.values():
-                            col_map[col] = "Ramo"
+                    elif (
+                        "riesgo" in c_clean
+                    ):  # Acepta "Riesgo", "Riesgo Asegurado", etc.
+                        col_map[col] = "Materia_Asegurada"
                     elif "ramo" in c_clean or "tipo" in c_clean:
                         col_map[col] = "Ramo"
                     elif (
@@ -264,10 +263,13 @@ with col_acc1:
                     cursor = conn.cursor()
                     registros_procesados = 0
 
-                    for _, row in df_excel.iterrows():
-                        nombre_val = str(
-                            row.get("Nombre", "CLIENTE SIN NOMBRE")
-                        ).strip()
+                    for i, r in df_excel.iterrows():
+                        raw_nombre = r.get("Nombre")
+                        nombre_val = (
+                            str(raw_nombre).strip()
+                            if pd.notna(raw_nombre)
+                            else "CLIENTE SIN NOMBRE"
+                        )
 
                         if (
                             not nombre_val
@@ -276,23 +278,58 @@ with col_acc1:
                         ):
                             continue
 
-                        rut_val = str(row.get("RUT", "SIN RUT")).strip()
-                        tel_val = str(row.get("Telefono", "")).strip()
-                        email_val = str(row.get("Email", "")).strip()
-                        comp_val = str(row.get("Compañia", "GENERAL")).strip()
-                        poliza_val = str(row.get("Poliza", "S/N")).strip()
+                        raw_rut = r.get("RUT")
+                        rut_val = (
+                            str(raw_rut).strip()
+                            if pd.notna(raw_rut)
+                            else "SIN RUT"
+                        )
 
-                        # Leer Ramo y Materia (Riesgo)
-                        ramo_val = str(
-                            row.get("Ramo", row.get("Materia", "General"))
-                        ).strip()
-                        materia_val = str(row.get("Materia", ramo_val)).strip()
+                        raw_tel = r.get("Telefono")
+                        tel_val = (
+                            str(raw_tel).strip()
+                            if pd.notna(raw_tel) and str(raw_tel) != "nan"
+                            else ""
+                        )
 
-                        venc_val = parse_custom_date(row.get("Vencimiento"))
+                        raw_email = r.get("Email")
+                        email_val = (
+                            str(raw_email).strip()
+                            if pd.notna(raw_email) and str(raw_email) != "nan"
+                            else ""
+                        )
+
+                        raw_comp = r.get("Compañia")
+                        comp_val = (
+                            str(raw_comp).strip()
+                            if pd.notna(raw_comp)
+                            else "GENERAL"
+                        )
+
+                        raw_pol = r.get("Poliza")
+                        poliza_val = (
+                            str(raw_pol).strip() if pd.notna(raw_pol) else "S/N"
+                        )
+
+                        raw_ramo = r.get("Ramo")
+                        ramo_val = (
+                            str(raw_ramo).strip()
+                            if pd.notna(raw_ramo)
+                            else "General"
+                        )
+
+                        # Extraer 'RIESGO ASEGURADO'
+                        raw_materia = r.get("Materia_Asegurada")
+                        if pd.notna(raw_materia) and str(raw_materia) != "nan":
+                            materia_val = str(raw_materia).strip()
+                        else:
+                            materia_val = ""
+
+                        venc_val = parse_custom_date(r.get("Vencimiento"))
 
                         try:
                             prima_val = float(
-                                str(row.get("Prima", 0))
+                                str(r.get("Prima", 0))
                                 .replace(",", ".")
                                 .replace("$", "")
                             )
@@ -301,7 +338,7 @@ with col_acc1:
 
                         try:
                             comision_val = float(
-                                str(row.get("Comision", 0))
+                                str(r.get("Comision", 0))
                                 .replace(",", ".")
                                 .replace("$", "")
                             )
@@ -324,7 +361,7 @@ with col_acc1:
                             cursor.execute(
                                 "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
                                 (
-                                    f"SIN-RUT-{registros_procesados}",
+                                    f"SIN-RUT-{i}-{registros_procesados}",
                                     nombre_val,
                                     email_val,
                                     tel_val,
@@ -338,7 +375,7 @@ with col_acc1:
                         )
                         id_comp = cursor.lastrowid
 
-                        # Insertar/Actualizar Póliza guardando el 'Riesgo' como materia_asegurada
+                        # Insertar/Actualizar Póliza
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
@@ -422,8 +459,7 @@ with col_acc2:
                 materia_especifica = f"Cobertura: {cargas}"
             else:
                 materia_especifica = st.text_input(
-                    "Materia Asegurada / Riesgo",
-                    placeholder="Ej: VEH. COMERCIALES",
+                    "Riesgo Asegurado", placeholder="Descripción del bien"
                 )
 
             btn_guardar = st.form_submit_button("Guardar en Sistema")
@@ -609,7 +645,7 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE CON RIESGO / MATERIA ASEGURADA
+# LISTADO DESPLEGABLE CON RIESGO ASEGURADO CORRECTO
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
@@ -623,8 +659,16 @@ if not df.empty:
         prima = float(row["prima"])
         comision_real = float(row["comision"])
         rut = str(row["rut"])
-        email = str(row["email"] or "")
-        tel = str(row["telefono"] or "")
+        email = (
+            ""
+            if str(row["email"]).lower() == "nan"
+            else str(row["email"] or "")
+        )
+        tel = (
+            ""
+            if str(row["telefono"]).lower() == "nan"
+            else str(row["telefono"] or "")
+        )
 
         venc_raw = row["fecha_vencimiento"]
         try:
@@ -641,9 +685,12 @@ if not df.empty:
         with st.expander(label_tarjeta):
             st.markdown('<div class="edit-box">', unsafe_allow_html=True)
 
-            # Banner que resalta el Riesgo/Materia Asegurada
+            # Banner Informativo con el Riesgo Asegurado exacto
+            texto_riesgo = (
+                materia if materia else "Sin riesgo/materia especificada"
+            )
             st.markdown(
-                f'<div class="materia-banner">🛡️ <b>Riesgo Asegurado / Materia:</b> {materia if materia else ramo}</div>',
+                f'<div class="materia-banner">🚗 <b>Riesgo Asegurado (Patente / Bien):</b> {texto_riesgo}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -665,15 +712,15 @@ if not df.empty:
 
                 with c2:
                     st.markdown(
-                        '<span class="badge-section badge-purple">📜 Póliza & Materia</span>',
+                        '<span class="badge-section badge-purple">📜 Póliza & Bien</span>',
                         unsafe_allow_html=True,
                     )
                     edit_comp = st.text_input("Aseguradora", value=aseguradora)
                     edit_poliza = st.text_input("N° Póliza", value=poliza)
                     edit_ramo = st.text_input("Ramo / Tipo", value=ramo)
                     edit_materia = st.text_input(
-                        "Materia / Riesgo Asegurado",
-                        value=materia if materia else ramo,
+                        "Riesgo Asegurado (Patente/Modelo/Dirección)",
+                        value=materia,
                     )
 
                 with c3:
