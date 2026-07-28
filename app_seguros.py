@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. CSS PERSONALIZADO MEJORADO (Estilos SaaS Coloridos y Pulidos)
+# 2. CSS Personalizado (SaaS Moderno y Colorido)
 st.markdown(
     """
     <style>
@@ -69,6 +69,17 @@ st.markdown(
     .badge-blue { background-color: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; }
     .badge-purple { background-color: #faf5ff; color: #6b46c1; border: 1px solid #e9d8fd; }
     .badge-green { background-color: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
+    .badge-orange { background-color: #fffaf0; color: #dd6b20; border: 1px solid #fbd38d; }
+
+    .materia-banner {
+        background-color: #edf2f7;
+        border-left: 4px solid #3182ce;
+        padding: 10px 15px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        font-weight: 600;
+        color: #2d3748;
+    }
 
     /* Estilo Botón Guardar Cambios */
     div.stButton > button[kind="primary"], div.stFormSubmitButton > button {
@@ -587,7 +598,7 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE CON EDICIÓN DIRECCIÓN Y DISEÑO MEJORADO
+# LISTADO DESPLEGABLE CON INFORMACIÓN DE MATERIA ASEGURADA
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
@@ -617,8 +628,16 @@ if not df.empty:
         label_tarjeta = f"👤 {nombre}  |  {aseguradora} · Póliza: {poliza} ({ramo})"
 
         with st.expander(label_tarjeta):
-            # Envoltorio visual con borde lateral colorido
             st.markdown('<div class="edit-box">', unsafe_allow_html=True)
+
+            # Banner Informativo con la Materia Asegurada destacada
+            materia_texto = (
+                materia if materia else "Sin especificación registrada"
+            )
+            st.markdown(
+                f'<div class="materia-banner">🔍 <b>Materia Asegurada / Detalle:</b> {materia_texto}</div>',
+                unsafe_allow_html=True,
+            )
 
             with st.form(key=f"form_edit_{id_poliza}_{idx}"):
                 st.markdown("## ✏️ Editar Información de la Póliza")
@@ -638,14 +657,16 @@ if not df.empty:
 
                 with c2:
                     st.markdown(
-                        '<span class="badge-section badge-purple">📜 Póliza</span>',
+                        '<span class="badge-section badge-purple">📜 Póliza & Materia</span>',
                         unsafe_allow_html=True,
                     )
                     edit_comp = st.text_input("Aseguradora", value=aseguradora)
                     edit_poliza = st.text_input("N° Póliza", value=poliza)
-                    edit_ramo = st.text_input("Ramo", value=ramo)
+                    edit_ramo = st.text_input("Ramo / Tipo", value=ramo)
                     edit_materia = st.text_input(
-                        "Materia Asegurada", value=materia
+                        "Materia Asegurada (Patente/Dirección/Cargas)",
+                        value=materia,
+                        placeholder="Ej: Patente: AA1234 o Av. Providencia 123",
                     )
 
                 with c3:
