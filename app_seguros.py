@@ -51,14 +51,6 @@ st.markdown(
     .metric-value.red { color: #9b2c2c; }
     .metric-label { font-size: 10px; color: #718096; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
 
-    .section-title {
-        font-size: 18px;
-        font-weight: 700;
-        color: #2d3748;
-        margin-top: 10px;
-        margin-bottom: 10px;
-    }
-
     .edit-box {
         background-color: #f8fafc;
         border-left: 5px solid #2b6cb0;
@@ -134,7 +126,8 @@ st.markdown(
         box-shadow: 0 4px 12px rgba(47, 133, 90, 0.4) !important;
     }
     
-    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
+    /* Pestañas / Hojas */
+    .stTabs [data-baseweb="tab-list"] { gap: 15px; }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
         white-space: pre-wrap;
@@ -142,8 +135,8 @@ st.markdown(
         border-radius: 8px 8px 0px 0px;
         padding-top: 10px;
         padding-bottom: 10px;
-        font-size: 16px;
-        font-weight: 600;
+        font-size: 15px;
+        font-weight: 700;
         color: #4a5568;
     }
     .stTabs [aria-selected="true"] {
@@ -217,260 +210,236 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# PESTAÑAS PRINCIPALES
-tab_main, tab_audit = st.tabs(["📊 Dashboard Principal", "🛠️ Limpieza y Auditoría de Datos"])
+# ---------------------------------------------------------
+# ACCIONES RÁPIDAS SUPERIORES (IMPORTAR / CREAR MANUAL)
+# ---------------------------------------------------------
+col_acc1, col_acc2 = st.columns([1, 1])
 
-# =========================================================
-# HOJA 1: DASHBOARD PRINCIPAL
-# =========================================================
-with tab_main:
-    
-    # 1. ACCIONES RÁPIDAS
-    col_acc1, col_acc2 = st.columns([1, 1])
+with col_acc1:
+    with st.expander("📥 Subir Planilla Excel"):
+        st.caption("Carga tu archivo de cartera (.xlsx / .xls)")
+        uploaded_file = st.file_uploader("Selecciona tu archivo Excel", type=["xlsx", "xls"])
+        limpiar_bd = st.checkbox("⚠️ Vaciar datos antiguos antes de importar (Recomendado)", value=True)
 
-    with col_acc1:
-        with st.expander("📥 Subir Planilla Excel"):
-            st.caption("Carga tu archivo de cartera (.xlsx / .xls)")
-            uploaded_file = st.file_uploader(
-                "Selecciona tu archivo Excel", type=["xlsx", "xls"]
-            )
+        if uploaded_file:
+            try:
+                df_raw = pd.read_excel(uploaded_file, header=None).fillna("")
 
-            limpiar_bd = st.checkbox(
-                "⚠️ Vaciar datos antiguos antes de importar (Recomendado)",
-                value=True,
-            )
+                header_idx = None
+                for idx, row in df_raw.iterrows():
+                    row_str = " ".join([str(c).lower().strip() for c in row.values])
+                    if "ramo" in row_str and ("riesgo" in row_str or "asegurado" in row_str or "nombre" in row_str):
+                        header_idx = idx
+                        break
 
-            if uploaded_file:
-                try:
-                    df_raw = pd.read_excel(uploaded_file, header=None)
-                    df_raw = df_raw.fillna("")
-
-                    header_idx = None
-                    for idx, row in df_raw.iterrows():
-                        row_str = " ".join([str(c).lower().strip() for c in row.values])
-                        if "ramo" in row_str and ("riesgo" in row_str or "asegurado" in row_str or "nombre" in row_str):
-                            header_idx = idx
-                            break
-
-                    if header_idx is not None:
-                        headers = [str(c).strip() for c in df_raw.iloc[header_idx].values]
-                        df_excel = df_raw.iloc[header_idx + 1:].copy()
-                        df_excel.columns = headers
-                    else:
-                        df_excel = df_raw.copy()
-
-                    seen = {}
-                    new_cols = []
-                    for col in df_excel.columns:
-                        c_str = str(col).strip()
-                        if c_str in seen:
-                            seen[c_str] += 1
-                            new_cols.append(f"{c_str}_{seen[c_str]}")
-                        else:
-                            seen[c_str] = 0
-                            new_cols.append(c_str)
-                    df_excel.columns = new_cols
-
-                    col_map = {}
-                    for col in df_excel.columns:
-                        c_clean = str(col).lower().strip()
-
-                        if "riesgo" in c_clean:
-                            col_map[col] = "Materia_Asegurada"
-                        elif "ramo" in c_clean:
-                            col_map[col] = "Ramo"
-                        elif "rut" in c_clean and "RUT" not in col_map.values():
-                            col_map[col] = "RUT"
-                        elif ("nombre" in c_clean or "asegurado" in c_clean) and "Nombre" not in col_map.values():
-                            col_map[col] = "Nombre"
-                        elif ("compañí" in c_clean or "compañi" in c_clean) and "Compañia" not in col_map.values():
-                            col_map[col] = "Compañia"
-                        elif ("poliza" in c_clean or "póliza" in c_clean) and "Poliza" not in col_map.values():
-                            col_map[col] = "Poliza"
-                        elif ("venc" in c_clean or "ren." in c_clean or "vigencia" in c_clean) and "Vencimiento" not in col_map.values():
-                            col_map[col] = "Vencimiento"
-                        elif "prima" in c_clean and "Prima" not in col_map.values():
-                            col_map[col] = "Prima"
-                        elif ("comision" in c_clean or "comisi" in c_clean) and "Comision" not in col_map.values():
-                            col_map[col] = "Comision"
-                        elif ("telefono" in c_clean or "teléfono" in c_clean) and "Telefono" not in col_map.values():
-                            col_map[col] = "Telefono"
-                        elif ("correo" in c_clean or "email" in c_clean) and "Email" not in col_map.values():
-                            col_map[col] = "Email"
-
-                    df_excel = df_excel.rename(columns=col_map)
-
-                    if "Nombre" in df_excel.columns:
-                        df_excel = df_excel[
-                            df_excel["Nombre"].astype(str).str.strip().ne("") & 
-                            ~df_excel["Nombre"].astype(str).str.contains("Ventas|Total|Nombre|Asegurado", case=False, na=False)
-                        ]
-
-                    st.success(f"📊 **Planilla detectada correctamente:** {len(df_excel)} registros listos para importar.")
-                    st.dataframe(df_excel.head(10), use_container_width=True)
-
-                    if st.button("🚀 Confirmar e Importar Todos a Aiven"):
-                        conn = get_connection()
-                        cursor = conn.cursor()
-
-                        if limpiar_bd:
-                            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-                            cursor.execute("TRUNCATE TABLE polizas;")
-                            cursor.execute("TRUNCATE TABLE clientes;")
-                            cursor.execute("TRUNCATE TABLE compañias;")
-                            cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-
-                        registros_procesados = 0
-
-                        for i, (_, r) in enumerate(df_excel.iterrows()):
-                            nombre_val = clean_val(r.get("Nombre"), "CLIENTE SIN NOMBRE")
-                            if not nombre_val or nombre_val == "CLIENTE SIN NOMBRE":
-                                continue
-
-                            rut_val = clean_val(r.get("RUT"), f"SIN-RUT-{i}-{registros_procesados}")
-                            tel_val = clean_val(r.get("Telefono"), "")
-                            email_val = clean_val(r.get("Email"), "")
-                            comp_val = clean_val(r.get("Compañia"), "GENERAL")
-                            poliza_val = clean_val(r.get("Poliza"), "S/N")
-                            ramo_val = clean_val(r.get("Ramo"), "General")
-                            materia_val = clean_val(r.get("Materia_Asegurada"), "")
-
-                            venc_val = parse_custom_date(r.get("Vencimiento"))
-
-                            try:
-                                prima_str = str(r.get("Prima", "0")).replace(",", ".").replace("$", "").strip()
-                                prima_val = float(prima_str) if prima_str else 0.0
-                            except (ValueError, TypeError):
-                                prima_val = 0.0
-
-                            try:
-                                com_str = str(r.get("Comision", "0")).replace(",", ".").replace("$", "").strip()
-                                comision_val = float(com_str) if com_str else 0.0
-                            except (ValueError, TypeError):
-                                comision_val = 0.0
-
-                            cursor.execute("SELECT id_cliente FROM clientes WHERE rut = %s;", (rut_val,))
-                            row_c = cursor.fetchone()
-                            if row_c:
-                                id_cliente = row_c[0]
-                            else:
-                                cursor.execute(
-                                    "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
-                                    (rut_val, nombre_val, email_val, tel_val)
-                                )
-                                id_cliente = cursor.lastrowid
-
-                            cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_val,))
-                            row_co = cursor.fetchone()
-                            if row_co:
-                                id_comp = row_co[0]
-                            else:
-                                cursor.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_val,))
-                                id_comp = cursor.lastrowid
-
-                            cursor.execute(
-                                """
-                                INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                                VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
-                                """,
-                                (poliza_val, id_cliente, id_comp, ramo_val, materia_val, venc_val, prima_val, comision_val)
-                            )
-
-                            registros_procesados += 1
-
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-
-                        st.success(f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente!")
-                        st.rerun()
-
-                except Exception as e:
-                    st.error(f"Error procesando el archivo Excel: {e}")
-
-    with col_acc2:
-        with st.expander("➕ Crear Nuevo Cliente a Mano"):
-            tipo_seguro = st.selectbox(
-                "Tipo de Seguro (Ramo):",
-                [
-                    "🚗 Auto / Vehículo",
-                    "🏠 Vivienda / Hogar",
-                    "🏥 Salud / Vida",
-                    "📋 Otro / General",
-                ],
-            )
-
-            with st.form("form_nuevo_cliente"):
-                c_nombre = st.text_input("Nombre Completo del Cliente", placeholder="Ej: Juan Pérez Soto")
-                c_tel = st.text_input("Teléfono de Contacto")
-                c_email = st.text_input("Correo Electrónico")
-
-                p_comp = st.text_input("Aseguradora", placeholder="SURA")
-                p_poliza = st.text_input("N° de Póliza")
-                p_venc = st.date_input("Fecha Vencimiento")
-                p_prima = st.number_input("Monto Prima", min_value=0.0)
-                p_comision = st.number_input("Monto Comisión", min_value=0.0)
-
-                materia_especifica = ""
-                if "Auto" in tipo_seguro:
-                    patente = st.text_input("Patente", placeholder="AA1234")
-                    modelo = st.text_input("Modelo / Año", placeholder="Toyota RAV4 2022")
-                    materia_especifica = f"Patente: {patente.upper()} - {modelo}"
-                elif "Vivienda" in tipo_seguro:
-                    direccion_prop = st.text_input("Dirección Propiedad", placeholder="Av. Providencia 1234, Dpto 502")
-                    materia_especifica = f"Propiedad: {direccion_prop}"
-                elif "Salud" in tipo_seguro:
-                    cargas = st.text_input("Cargas / Beneficiarios", placeholder="Ej: Cónyuge + 2 Hijos")
-                    materia_especifica = f"Cobertura: {cargas}"
+                if header_idx is not None:
+                    headers = [str(c).strip() for c in df_raw.iloc[header_idx].values]
+                    df_excel = df_raw.iloc[header_idx + 1:].copy()
+                    df_excel.columns = headers
                 else:
-                    materia_especifica = st.text_input("Riesgo Asegurado", placeholder="Descripción del bien")
+                    df_excel = df_raw.copy()
 
-                btn_guardar = st.form_submit_button("Guardar en Sistema")
+                seen = {}
+                new_cols = []
+                for col in df_excel.columns:
+                    c_str = str(col).strip()
+                    if c_str in seen:
+                        seen[c_str] += 1
+                        new_cols.append(f"{c_str}_{seen[c_str]}")
+                    else:
+                        seen[c_str] = 0
+                        new_cols.append(c_str)
+                df_excel.columns = new_cols
 
-                if btn_guardar and c_nombre:
-                    try:
-                        conn = get_connection()
-                        cursor = conn.cursor()
+                col_map = {}
+                for col in df_excel.columns:
+                    c_clean = str(col).lower().strip()
+                    if "riesgo" in c_clean:
+                        col_map[col] = "Materia_Asegurada"
+                    elif "ramo" in c_clean:
+                        col_map[col] = "Ramo"
+                    elif "rut" in c_clean and "RUT" not in col_map.values():
+                        col_map[col] = "RUT"
+                    elif ("nombre" in c_clean or "asegurado" in c_clean) and "Nombre" not in col_map.values():
+                        col_map[col] = "Nombre"
+                    elif ("compañí" in c_clean or "compañi" in c_clean) and "Compañia" not in col_map.values():
+                        col_map[col] = "Compañia"
+                    elif ("poliza" in c_clean or "póliza" in c_clean) and "Poliza" not in col_map.values():
+                        col_map[col] = "Poliza"
+                    elif ("venc" in c_clean or "ren." in c_clean or "vigencia" in c_clean) and "Vencimiento" not in col_map.values():
+                        col_map[col] = "Vencimiento"
+                    elif "prima" in c_clean and "Prima" not in col_map.values():
+                        col_map[col] = "Prima"
+                    elif ("comision" in c_clean or "comisi" in c_clean) and "Comision" not in col_map.values():
+                        col_map[col] = "Comision"
+                    elif ("telefono" in c_clean or "teléfono" in c_clean) and "Telefono" not in col_map.values():
+                        col_map[col] = "Telefono"
+                    elif ("correo" in c_clean or "email" in c_clean) and "Email" not in col_map.values():
+                        col_map[col] = "Email"
+
+                df_excel = df_excel.rename(columns=col_map)
+
+                if "Nombre" in df_excel.columns:
+                    df_excel = df_excel[
+                        df_excel["Nombre"].astype(str).str.strip().ne("") & 
+                        ~df_excel["Nombre"].astype(str).str.contains("Ventas|Total|Nombre|Asegurado", case=False, na=False)
+                    ]
+
+                st.success(f"📊 **Planilla detectada correctamente:** {len(df_excel)} registros listos para importar.")
+                st.dataframe(df_excel.head(10), use_container_width=True)
+
+                if st.button("🚀 Confirmar e Importar Todos a Aiven"):
+                    conn = get_connection()
+                    cursor = conn.cursor()
+
+                    if limpiar_bd:
+                        cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+                        cursor.execute("TRUNCATE TABLE polizas;")
+                        cursor.execute("TRUNCATE TABLE clientes;")
+                        cursor.execute("TRUNCATE TABLE compañias;")
+                        cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+
+                    registros_procesados = 0
+
+                    for i, (_, r) in enumerate(df_excel.iterrows()):
+                        nombre_val = clean_val(r.get("Nombre"), "CLIENTE SIN NOMBRE")
+                        if not nombre_val or nombre_val == "CLIENTE SIN NOMBRE":
+                            continue
+
+                        rut_val = clean_val(r.get("RUT"), f"SIN-RUT-{i}-{registros_procesados}")
+                        tel_val = clean_val(r.get("Telefono"), "")
+                        email_val = clean_val(r.get("Email"), "")
+                        comp_val = clean_val(r.get("Compañia"), "GENERAL")
+                        poliza_val = clean_val(r.get("Poliza"), "S/N")
+                        ramo_val = clean_val(r.get("Ramo"), "General")
+                        materia_val = clean_val(r.get("Materia_Asegurada"), "")
+
+                        venc_val = parse_custom_date(r.get("Vencimiento"))
+
+                        try:
+                            prima_str = str(r.get("Prima", "0")).replace(",", ".").replace("$", "").strip()
+                            prima_val = float(prima_str) if prima_str else 0.0
+                        except (ValueError, TypeError):
+                            prima_val = 0.0
+
+                        try:
+                            com_str = str(r.get("Comision", "0")).replace(",", ".").replace("$", "").strip()
+                            comision_val = float(com_str) if com_str else 0.0
+                        except (ValueError, TypeError):
+                            comision_val = 0.0
+
+                        cursor.execute("SELECT id_cliente FROM clientes WHERE rut = %s;", (rut_val,))
+                        row_c = cursor.fetchone()
+                        if row_c:
+                            id_cliente = row_c[0]
+                        else:
+                            cursor.execute("INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);", (rut_val, nombre_val, email_val, tel_val))
+                            id_cliente = cursor.lastrowid
+
+                        cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_val,))
+                        row_co = cursor.fetchone()
+                        if row_co:
+                            id_comp = row_co[0]
+                        else:
+                            cursor.execute("INSERT INTO compañias (nombre) VALUES (%s);", (comp_val,))
+                            id_comp = cursor.lastrowid
 
                         cursor.execute(
-                            "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES ('SIN RUT', %s, %s, %s);",
-                            (c_nombre, c_email, c_tel),
-                        )
-                        id_c = cursor.lastrowid
-
-                        cursor.execute(
-                            "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
-                            (p_comp or "GENERAL",),
-                        )
-                        id_co = cursor.lastrowid
-
-                        ramo_nombre = tipo_seguro.split(" ")[1]
-
-                        cursor.execute(
-                            "INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vigente');",
-                            (
-                                p_poliza or "S/N",
-                                id_c,
-                                id_co,
-                                ramo_nombre,
-                                materia_especifica,
-                                p_venc,
-                                p_prima,
-                                p_comision,
-                            ),
+                            """
+                            INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
+                            """,
+                            (poliza_val, id_cliente, id_comp, ramo_val, materia_val, venc_val, prima_val, comision_val)
                         )
 
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-                        st.success(f"¡Cliente **{c_nombre}** guardado con éxito!")
-                        st.rerun()
-                    except Exception as err:
-                        st.error(f"Error al guardar: {err}")
+                        registros_procesados += 1
 
-    st.write("---")
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
 
-    # 2. CÁLCULO DE KPIS GENERALES (INDIVIDUAL DE LA BASE COMPLETA)
+                    st.success(f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente!")
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"Error procesando el archivo Excel: {e}")
+
+with col_acc2:
+    with st.expander("➕ Crear Nuevo Cliente a Mano"):
+        tipo_seguro = st.selectbox("Tipo de Seguro (Ramo):", ["🚗 Auto / Vehículo", "🏠 Vivienda / Hogar", "🏥 Salud / Vida", "📋 Otro / General"])
+
+        with st.form("form_nuevo_cliente"):
+            c_nombre = st.text_input("Nombre Completo del Cliente", placeholder="Ej: Juan Pérez Soto")
+            c_tel = st.text_input("Teléfono de Contacto")
+            c_email = st.text_input("Correo Electrónico")
+
+            p_comp = st.text_input("Aseguradora", placeholder="SURA")
+            p_poliza = st.text_input("N° de Póliza")
+            p_venc = st.date_input("Fecha Vencimiento")
+            p_prima = st.number_input("Monto Prima", min_value=0.0)
+            p_comision = st.number_input("Monto Comisión", min_value=0.0)
+
+            materia_especifica = ""
+            if "Auto" in tipo_seguro:
+                patente = st.text_input("Patente", placeholder="AA1234")
+                modelo = st.text_input("Modelo / Año", placeholder="Toyota RAV4 2022")
+                materia_especifica = f"Patente: {patente.upper()} - {modelo}"
+            elif "Vivienda" in tipo_seguro:
+                direccion_prop = st.text_input("Dirección Propiedad", placeholder="Av. Providencia 1234, Dpto 502")
+                materia_especifica = f"Propiedad: {direccion_prop}"
+            elif "Salud" in tipo_seguro:
+                cargas = st.text_input("Cargas / Beneficiarios", placeholder="Ej: Cónyuge + 2 Hijos")
+                materia_especifica = f"Cobertura: {cargas}"
+            else:
+                materia_especifica = st.text_input("Riesgo Asegurado", placeholder="Descripción del bien")
+
+            btn_guardar = st.form_submit_button("Guardar en Sistema")
+
+            if btn_guardar and c_nombre:
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+
+                    cursor.execute("INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES ('SIN RUT', %s, %s, %s);", (c_nombre, c_email, c_tel))
+                    id_c = cursor.lastrowid
+
+                    cursor.execute("INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);", (p_comp or "GENERAL",))
+                    id_co = cursor.lastrowid
+
+                    ramo_nombre = tipo_seguro.split(" ")[1]
+
+                    cursor.execute(
+                        "INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vigente');",
+                        (p_poliza or "S/N", id_c, id_co, ramo_nombre, materia_especifica, p_venc, p_prima, p_comision)
+                    )
+
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    st.success(f"¡Cliente **{c_nombre}** guardado con éxito!")
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"Error al guardar: {err}")
+
+st.write("")
+
+# =========================================================
+# TRES PESTAÑAS (HOJAS) COMPLETAMENTE SEPARADAS
+# =========================================================
+tab_kpis, tab_search, tab_audit = st.tabs([
+    "📊 1. Indicadores Generales (KPIs)",
+    "🔍 2. Búsqueda y Gestión de Cartera",
+    "🛠️ 3. Limpieza y Auditoría de Datos"
+])
+
+# ---------------------------------------------------------
+# HOJA 1: INDICADORES GENERALES (KPIs Y ANALÍTICA GLOBAL)
+# ---------------------------------------------------------
+with tab_kpis:
+    st.markdown("### 📈 Panel de Desempeño Global del Negocio")
+    st.caption("Resumen financiero y distribución completa de la cartera de clientes.")
+    st.write("")
+
     total_clientes_gen = 0
     total_polizas_gen = 0
     total_comision_mes_actual = 0.0
@@ -479,23 +448,24 @@ with tab_main:
 
     try:
         conn = get_connection()
-
         hoy = datetime.now()
         primer_dia_mes_actual = hoy.replace(day=1).strftime("%Y-%m-%d")
         ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
         primer_dia_mes_anterior = ((hoy.replace(day=1) - timedelta(days=1)).replace(day=1)).strftime("%Y-%m-%d")
 
-        # Cómputos generales de la base entera
-        query_totales = "SELECT COUNT(DISTINCT id_cliente) as tot_cli, COUNT(id_poliza) as tot_pol FROM polizas;"
-        df_totales = pd.read_sql(query_totales, conn)
+        # Cómputos globales
+        df_totales = pd.read_sql("SELECT COUNT(DISTINCT id_cliente) as tot_cli, COUNT(id_poliza) as tot_pol FROM polizas;", conn)
         total_clientes_gen = int(df_totales["tot_cli"].iloc[0])
         total_polizas_gen = int(df_totales["tot_pol"].iloc[0])
 
-        query_mes_actual = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');"
-        query_mes_anterior = f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';"
-
-        df_actual = pd.read_sql(query_mes_actual, conn)
-        df_anterior = pd.read_sql(query_mes_anterior, conn)
+        df_actual = pd.read_sql(f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_actual}' AND fecha_vencimiento <= LAST_DAY('{primer_dia_mes_actual}');", conn)
+        df_anterior = pd.read_sql(f"SELECT COALESCE(SUM(monto_comision), 0) as total FROM polizas WHERE fecha_vencimiento >= '{primer_dia_mes_anterior}' AND fecha_vencimiento <= '{ultimo_dia_mes_anterior}';", conn)
+        
+        # Cargar base completa para los gráficos globales
+        df_global = pd.read_sql("""
+            SELECT p.id_poliza, COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia, COALESCE(p.ramo, 'General') as ramo 
+            FROM polizas p LEFT JOIN compañias co ON p.id_compañia = co.id_compañia;
+        """, conn)
         conn.close()
 
         total_comision_mes_actual = float(df_actual["total"].iloc[0])
@@ -503,10 +473,9 @@ with tab_main:
         variacion_comision = total_comision_mes_actual - total_comision_mes_anterior
 
     except Exception:
-        pass
+        df_global = pd.DataFrame()
 
-    # TARJETAS DE KPIS GENERALES
-    st.markdown("<p class='section-title'>📊 Indicadores Generales de Negocio</p>", unsafe_allow_html=True)
+    # TARJETAS DE KPIS
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
         st.markdown(f"""<div class="metric-card"><p class="metric-value">{total_clientes_gen}</p><p class="metric-label">CLIENTES TOTALES</p></div>""", unsafe_allow_html=True)
@@ -521,14 +490,44 @@ with tab_main:
         signo = "+" if variacion_comision >= 0 else ""
         st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
 
+    st.write("")
     st.write("---")
 
-    # 3. BÚSQUEDA Y GESTIÓN DE CLIENTES SEPARADA
-    st.markdown("<p class='section-title'>🔍 Búsqueda y Gestión de Cartera</p>", unsafe_allow_html=True)
+    # GRÁFICOS VISUALES
+    if not df_global.empty:
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            st.markdown("##### 🏢 Pólizas por Compañía Aseguradora")
+            df_comp = df_global.groupby("compañia")["id_poliza"].count().reset_index()
+            df_comp.columns = ["Compañía", "Cantidad"]
+            df_comp = df_comp.sort_values(by="Cantidad", ascending=True)
+
+            fig_comp = px.bar(df_comp, x="Cantidad", y="Compañía", orientation="h", text="Cantidad", color_discrete_sequence=["#2b6cb0"])
+            fig_comp.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320, xaxis_title="", yaxis_title="", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        with col_g2:
+            st.markdown("##### 🚗 Distribución por Ramo / Tipo de Seguro")
+            df_ramo = df_global.groupby("ramo")["id_poliza"].count().reset_index()
+            df_ramo.columns = ["Ramo", "Cantidad"]
+
+            fig_ramo = px.pie(df_ramo, values="Cantidad", names="Ramo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
+            fig_ramo.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=320, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_ramo, use_container_width=True)
+
+
+# ---------------------------------------------------------
+# HOJA 2: BÚSQUEDA Y GESTIÓN DE CARTERA
+# ---------------------------------------------------------
+with tab_search:
+    st.markdown("### 🔍 Módulo de Búsqueda y Gestión Directa")
+    st.caption("Encuentra pólizas rápidamente, filtra por vencimiento y realiza acciones por WhatsApp o Correo.")
+    st.write("")
 
     busqueda = st.text_input(
         "Buscador Oculto",
-        placeholder="🔍 Buscar por nombre, aseguradora, teléfono o patente...",
+        placeholder="🔍 Buscar por nombre de cliente, aseguradora, N° póliza o patente...",
         label_visibility="collapsed",
     )
 
@@ -547,7 +546,6 @@ with tab_main:
 
     st.write("")
 
-    # CONSULTA FILTRADA PARA LA LISTA
     try:
         conn = get_connection()
         hoy = datetime.now()
@@ -591,48 +589,14 @@ with tab_main:
 
         query_base += " ORDER BY p.fecha_vencimiento ASC;"
 
-        df = pd.read_sql(query_base, conn)
+        df_search = pd.read_sql(query_base, conn)
         conn.close()
     except Exception:
-        df = pd.DataFrame()
+        df_search = pd.DataFrame()
 
-    # GRÁFICOS VISUALES (OPCIONALES)
-    if not df.empty:
-        with st.expander("📊 Ver Análisis Gráfico del Filtro Actual", expanded=False):
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.markdown("##### 🏢 Pólizas por Compañía Aseguradora")
-                df_comp = df.groupby("compañia")["id_poliza"].count().reset_index()
-                df_comp.columns = ["Compañía", "Cantidad"]
-                df_comp = df_comp.sort_values(by="Cantidad", ascending=True)
-
-                fig_comp = px.bar(
-                    df_comp, x="Cantidad", y="Compañía", orientation="h", text="Cantidad", color_discrete_sequence=["#2b6cb0"],
-                )
-                fig_comp.update_layout(
-                    margin=dict(l=10, r=10, t=10, b=10), height=280, xaxis_title="", yaxis_title="", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                )
-                st.plotly_chart(fig_comp, use_container_width=True)
-
-            with col_g2:
-                st.markdown("##### 🚗 Distribución por Ramo / Tipo de Seguro")
-                df_ramo = df.groupby("ramo")["id_poliza"].count().reset_index()
-                df_ramo.columns = ["Ramo", "Cantidad"]
-
-                fig_ramo = px.pie(
-                    df_ramo, values="Cantidad", names="Ramo", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3,
-                )
-                fig_ramo.update_layout(
-                    margin=dict(l=10, r=10, t=10, b=10), height=280, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                )
-                st.plotly_chart(fig_ramo, use_container_width=True)
-
-    st.write("")
-
-    # LISTADO DESPLEGABLE CON BOTONES
-    if not df.empty:
-        st.caption(f"Mostrando **{len(df)} pólizas** que coinciden con el filtro de búsqueda.")
-        for idx, row in df.iterrows():
+    if not df_search.empty:
+        st.caption(f"Mostrando **{len(df_search)} resultados** de la búsqueda:")
+        for idx, row in df_search.iterrows():
             id_poliza = row["id_poliza"]
             id_cliente = row["id_cliente"]
             nombre = str(row["nombre_completo"]).upper()
@@ -730,16 +694,17 @@ with tab_main:
                             st.error(f"Error al actualizar la póliza: {err}")
                 st.markdown("</div>", unsafe_allow_html=True)
     else:
-        st.info("No hay registros que coincidan con el filtro seleccionado.")
+        st.info("No se encontraron clientes o pólizas con el filtro de búsqueda ingresado.")
 
 
-# =========================================================
-# HOJA 2: AUDITORÍA Y LIMPIEZA DE DATOS (INDEPENDIENTE)
-# =========================================================
+# ---------------------------------------------------------
+# HOJA 3: LIMPIEZA Y AUDITORÍA DE DATOS
+# ---------------------------------------------------------
 with tab_audit:
     st.markdown("### 🛠️ Limpieza y Auditoría de Base de Datos")
-    st.write("En esta sección puedes ver todos los registros de tu base de datos global que tienen información incompleta. Haz doble clic en las celdas para corregirlos rápidamente.")
-    
+    st.write("Filtra celdas faltantes en toda la base de datos y edítalas directamente en la tabla como si fuera un Excel.")
+    st.write("")
+
     filtro_faltante = st.selectbox(
         "Selecciona el dato que quieres buscar y completar:",
         [
@@ -808,13 +773,13 @@ with tab_audit:
                     df_f['Riesgo_Patente'].isin(['', 'nan', 'None'])
                 ]
 
-            st.markdown(f"#### 🔍 Resultados: {len(df_f)} registros incompletos")
+            st.markdown(f"#### 🔍 Registros Encontrados: {len(df_f)}")
 
             if not df_f.empty:
                 df_editable = df_f[['ID_Poliza', 'ID_Cliente', 'Nombre', 'RUT', 'Telefono', 'Email', 'Aseguradora', 'N_Poliza', 'Ramo', 'Riesgo_Patente', 'Fecha_Vencimiento']].copy()
                 df_editable.columns = ['ID_Poliza', 'ID_Cliente', 'Nombre', 'RUT', 'Teléfono', 'Email', 'Aseguradora', 'N° Póliza', 'Ramo', 'Riesgo / Patente', 'Fecha Vencimiento']
 
-                st.caption("✍️ **Doble clic en cualquier celda de abajo para editarla.** Una vez termines de rellenar los huecos, presiona Guardar.")
+                st.caption("✍️ **Doble clic en cualquier celda para editar.** Al terminar, haz clic en Guardar.")
                 edited_df = st.data_editor(
                     df_editable,
                     disabled=['ID_Poliza', 'ID_Cliente'],
@@ -855,12 +820,12 @@ with tab_audit:
                         conn_sav.commit()
                         cursor_sav.close()
                         conn_sav.close()
-                        st.success("🎉 ¡Todos los datos editados han sido actualizados con éxito en la base de datos!")
+                        st.success("🎉 ¡Todos los datos editados han sido actualizados con éxito en Aiven!")
                         st.rerun()
                     except Exception as err_m:
                         st.error(f"Error actualizando registros: {err_m}")
             else:
-                st.success("✅ ¡Excelente! No hay registros incompletos para este filtro. Todo al día.")
+                st.success("✅ ¡Excelente! No hay registros incompletos para este filtro en toda la base de datos.")
         else:
             st.info("Tu base de datos está vacía. Importa un Excel primero.")
 
