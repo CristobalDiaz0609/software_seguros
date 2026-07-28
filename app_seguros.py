@@ -47,16 +47,6 @@ st.markdown(
     .metric-value.green { color: #2f855a; }
     .metric-value.red { color: #c53030; }
     .metric-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; }
-
-    /* Ficha de detalle de póliza */
-    .detail-box {
-        background-color: #f7fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 15px;
-        margin-top: 5px;
-        margin-bottom: 10px;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -468,6 +458,7 @@ try:
 
     query_base = """
         SELECT 
+            p.id_poliza,
             c.id_cliente,
             c.rut,
             c.nombre_completo,
@@ -558,57 +549,133 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE CON DETALLE COMPLETO
+# LISTADO DESPLEGABLE CON EDICIÓN DIRECTA
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
+        id_poliza = row["id_poliza"]
+        id_cliente = row["id_cliente"]
         nombre = str(row["nombre_completo"]).upper()
         aseguradora = str(row["compañia"]).upper()
         poliza = str(row["poliza"])
         ramo = str(row["ramo"]).upper()
         materia = str(row["materia"])
-        prima = row["prima"]
-        comision_real = row["comision"]
-        moneda = row["moneda"]
-        venc = row["fecha_vencimiento"]
-        rut = row["rut"]
-        email = row["email"] or "No registrado"
-        tel = row["telefono"] or "No registrado"
+        prima = float(row["prima"])
+        comision_real = float(row["comision"])
+        rut = str(row["rut"])
+        email = str(row["email"] or "")
+        tel = str(row["telefono"] or "")
 
-        # Título de la tarjeta expandible
+        # Manejo seguro de fecha de vencimiento
+        venc_raw = row["fecha_vencimiento"]
+        try:
+            venc_date = (
+                pd.to_datetime(venc_raw).date()
+                if pd.notna(venc_raw)
+                else datetime.now().date()
+            )
+        except Exception:
+            venc_date = datetime.now().date()
+
         label_tarjeta = f"👤 {nombre}  |  {aseguradora} · Póliza: {poliza} ({ramo})"
 
         with st.expander(label_tarjeta):
-            # Contenido detallado de la póliza
-            c1, c2, c3 = st.columns(3)
+            with st.form(key=f"form_edit_{id_poliza}_{idx}"):
+                st.markdown("### ✏️ Editar Información de la Póliza")
 
-            with c1:
-                st.markdown("### 👤 Datos del Cliente")
-                st.write(f"**Nombre:** {nombre}")
-                st.write(f"**RUT:** {rut}")
-                st.write(f"**Teléfono:** {tel}")
-                st.write(f"**Email:** {email}")
+                c1, c2, c3 = st.columns(3)
 
-            with c2:
-                st.markdown("### 📜 Detalle Póliza")
-                st.write(f"**Aseguradora:** {aseguradora}")
-                st.write(f"**N° Póliza:** {poliza}")
-                st.write(f"**Ramo:** {ramo}")
-                st.write(
-                    f"**Materia Asegurada:** {materia if materia else 'Sin especificación'}"
+                with c1:
+                    st.subheader("👤 Cliente")
+                    edit_nombre = st.text_input("Nombre Completo", value=nombre)
+                    edit_rut = st.text_input("RUT", value=rut)
+                    edit_tel = st.text_input("Teléfono", value=tel)
+                    edit_email = st.text_input("Email", value=email)
+
+                with c2:
+                    st.subheader("📜 Póliza")
+                    edit_comp = st.text_input("Aseguradora", value=aseguradora)
+                    edit_poliza = st.text_input("N° Póliza", value=poliza)
+                    edit_ramo = st.text_input("Ramo", value=ramo)
+                    edit_materia = st.text_input(
+                        "Materia Asegurada", value=materia
+                    )
+
+                with c3:
+                    st.subheader("💰 Finanzas & Fecha")
+                    edit_prima = st.number_input(
+                        "Monto Prima", min_value=0.0, value=prima
+                    )
+                    edit_comision = st.number_input(
+                        "Monto Comisión", min_value=0.0, value=comision_real
+                    )
+                    edit_venc = st.date_input(
+                        "Fecha Vencimiento", value=venc_date
+                    )
+
+                btn_guardar_cambios = st.form_submit_button(
+                    "💾 Guardar Cambios"
                 )
 
-            with c3:
-                st.markdown("### 💰 Finanzas & Fechas")
-                st.write(f"**Monto Prima:** ${prima:,.2f} {moneda}")
-                st.write(f"**Comisión:** ${comision_real:,.2f}")
-                st.write(f"**Vencimiento:** {venc}")
+                if btn_guardar_cambios:
+                    try:
+                        conn = get_connection()
+                        cursor = conn.cursor()
 
-            st.button(
-                "💬 Contactar Cliente",
-                key=f"btn_contact_{idx}_{poliza}",
-                use_container_width=True,
-            )
+                        # 1. Actualizar Cliente
+                        cursor.execute(
+                            """
+                            UPDATE clientes 
+                            SET nombre_completo = %s, rut = %s, telefono = %s, email = %s 
+                            WHERE id_cliente = %s
+                        """,
+                            (
+                                edit_nombre,
+                                edit_rut,
+                                edit_tel,
+                                edit_email,
+                                id_cliente,
+                            ),
+                        )
+
+                        # 2. Actualizar o Insertar Compañía si cambió
+                        cursor.execute(
+                            "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
+                            (edit_comp,),
+                        )
+                        id_comp_actualizada = cursor.lastrowid
+
+                        # 3. Actualizar Póliza
+                        cursor.execute(
+                            """
+                            UPDATE polizas 
+                            SET numero_poliza = %s, id_compañia = %s, ramo = %s, materia_asegurada = %s, 
+                                monto_prima_anual = %s, monto_comision = %s, fecha_vencimiento = %s 
+                            WHERE id_poliza = %s
+                        """,
+                            (
+                                edit_poliza,
+                                id_comp_actualizada,
+                                edit_ramo,
+                                edit_materia,
+                                edit_prima,
+                                edit_comision,
+                                edit_venc,
+                                id_poliza,
+                            ),
+                        )
+
+                        conn.commit()
+                        cursor.close()
+                        conn.close()
+
+                        st.success(
+                            "¡Información de la póliza actualizada con éxito!"
+                        )
+                        st.rerun()
+
+                    except Exception as err:
+                        st.error(f"Error al actualizar la póliza: {err}")
 
 else:
     st.info("No hay registros que coincidan con el filtro seleccionado.")
