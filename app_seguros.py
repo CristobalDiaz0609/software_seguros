@@ -125,7 +125,7 @@ def deduplicate_columns(columns):
 
 
 def parse_custom_date(val):
-    if pd.isna(val):
+    if pd.isna(val) or str(val).lower() == "nan":
         return datetime.now().strftime("%Y-%m-%d")
     val_str = str(val).strip()
 
@@ -137,6 +137,12 @@ def parse_custom_date(val):
         return pd.to_datetime(val_str, dayfirst=True).strftime("%Y-%m-%d")
     except Exception:
         return datetime.now().strftime("%Y-%m-%d")
+
+
+def clean_str(val, default=""):
+    if pd.isna(val) or str(val).lower() in ["nan", "none", "null"]:
+        return default
+    return str(val).strip()
 
 
 # Encabezado
@@ -151,7 +157,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN DE EXCEL CON LIMPIEZA DE BD
+# MÓDULO DE IMPORTACIÓN DE EXCEL INTELIGENTE
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -171,6 +177,7 @@ with col_acc1:
             try:
                 df_raw = pd.read_excel(uploaded_file, header=None)
 
+                # Búsqueda ESTRICTA del encabezado real (Riesgo Asegurado / RUT Asegurado)
                 header_idx = None
                 for idx, row in df_raw.iterrows():
                     cells_as_str = [
@@ -178,8 +185,10 @@ with col_acc1:
                     ]
                     row_str = " ".join(cells_as_str).lower().strip()
 
-                    if ("asegurado" in row_str or "nombre" in row_str) and (
-                        "compañ" in row_str or "poliza" in row_str
+                    if (
+                        "riesgo asegurado" in row_str
+                        or "rut asegurado" in row_str
+                        or ("ramo" in row_str and "nombre" in row_str)
                     ):
                         header_idx = idx
                         break
@@ -191,7 +200,7 @@ with col_acc1:
 
                 df_excel.columns = deduplicate_columns(df_excel.columns)
 
-                # MAPEO PRECISO: Columna "Riesgo Asegurado" -> Materia_Asegurada
+                # MAPEO DIRECTO Y RIGUROSO
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
@@ -269,66 +278,24 @@ with col_acc1:
                     registros_procesados = 0
 
                     for i, r in df_excel.iterrows():
-                        raw_nombre = r.get("Nombre")
-                        nombre_val = (
-                            str(raw_nombre).strip()
-                            if pd.notna(raw_nombre)
-                            else "CLIENTE SIN NOMBRE"
+                        nombre_val = clean_str(
+                            r.get("Nombre"), "CLIENTE SIN NOMBRE"
                         )
-
                         if (
                             not nombre_val
-                            or nombre_val.lower() == "nan"
-                            or nombre_val.lower() == "none"
+                            or nombre_val == "CLIENTE SIN NOMBRE"
                         ):
                             continue
 
-                        raw_rut = r.get("RUT")
-                        rut_val = (
-                            str(raw_rut).strip()
-                            if pd.notna(raw_rut)
-                            else "SIN RUT"
+                        rut_val = clean_str(
+                            r.get("RUT"), f"SIN-RUT-{i}-{registros_procesados}"
                         )
-
-                        raw_tel = r.get("Telefono")
-                        tel_val = (
-                            str(raw_tel).strip()
-                            if pd.notna(raw_tel) and str(raw_tel) != "nan"
-                            else ""
-                        )
-
-                        raw_email = r.get("Email")
-                        email_val = (
-                            str(raw_email).strip()
-                            if pd.notna(raw_email) and str(raw_email) != "nan"
-                            else ""
-                        )
-
-                        raw_comp = r.get("Compañia")
-                        comp_val = (
-                            str(raw_comp).strip()
-                            if pd.notna(raw_comp)
-                            else "GENERAL"
-                        )
-
-                        raw_pol = r.get("Poliza")
-                        poliza_val = (
-                            str(raw_pol).strip() if pd.notna(raw_pol) else "S/N"
-                        )
-
-                        raw_ramo = r.get("Ramo")
-                        ramo_val = (
-                            str(raw_ramo).strip()
-                            if pd.notna(raw_ramo)
-                            else "General"
-                        )
-
-                        # Extraer la patente/modelo exacto de "Riesgo Asegurado"
-                        raw_materia = r.get("Materia_Asegurada")
-                        if pd.notna(raw_materia) and str(raw_materia) != "nan":
-                            materia_val = str(raw_materia).strip()
-                        else:
-                            materia_val = ""
+                        tel_val = clean_str(r.get("Telefono"), "")
+                        email_val = clean_str(r.get("Email"), "")
+                        comp_val = clean_str(r.get("Compañia"), "GENERAL")
+                        poliza_val = clean_str(r.get("Poliza"), "S/N")
+                        ramo_val = clean_str(r.get("Ramo"), "General")
+                        materia_val = clean_str(r.get("Materia_Asegurada"), "")
 
                         venc_val = parse_custom_date(r.get("Vencimiento"))
 
@@ -350,45 +317,41 @@ with col_acc1:
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
-                        if rut_val != "SIN RUT" and rut_val != "nan":
-                            cursor.execute(
-                                """
-                                INSERT INTO clientes (rut, nombre_completo, email, telefono) 
-                                VALUES (%s, %s, %s, %s)
-                                ON DUPLICATE KEY UPDATE 
-                                    id_cliente=LAST_INSERT_ID(id_cliente),
-                                    nombre_completo=VALUES(nombre_completo);
-                            """,
-                                (rut_val, nombre_val, email_val, tel_val),
-                            )
-                            id_cliente = cursor.lastrowid
+                        # 1. Insertar / Buscar Cliente
+                        cursor.execute(
+                            "SELECT id_cliente FROM clientes WHERE rut = %s;",
+                            (rut_val,),
+                        )
+                        row_c = cursor.fetchone()
+                        if row_c:
+                            id_cliente = row_c[0]
                         else:
                             cursor.execute(
                                 "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
-                                (
-                                    f"SIN-RUT-{i}-{registros_procesados}",
-                                    nombre_val,
-                                    email_val,
-                                    tel_val,
-                                ),
+                                (rut_val, nombre_val, email_val, tel_val),
                             )
                             id_cliente = cursor.lastrowid
 
+                        # 2. Insertar / Buscar Compañía
                         cursor.execute(
-                            "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
+                            "SELECT id_compañia FROM compañias WHERE nombre = %s;",
                             (comp_val,),
                         )
-                        id_comp = cursor.lastrowid
+                        row_co = cursor.fetchone()
+                        if row_co:
+                            id_comp = row_co[0]
+                        else:
+                            cursor.execute(
+                                "INSERT INTO compañias (nombre) VALUES (%s);",
+                                (comp_val,),
+                            )
+                            id_comp = cursor.lastrowid
 
+                        # 3. Insertar Póliza limpia
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
-                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida')
-                            ON DUPLICATE KEY UPDATE 
-                                materia_asegurada=VALUES(materia_asegurada),
-                                ramo=VALUES(ramo),
-                                monto_prima_anual=VALUES(monto_prima_anual),
-                                monto_comision=VALUES(monto_comision);
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
                         """,
                             (
                                 poliza_val,
@@ -409,7 +372,7 @@ with col_acc1:
                     conn.close()
 
                     st.success(
-                        f"🎉 ¡Se importaron {registros_procesados} pólizas con sus Riesgos Asegurados correctamente!"
+                        f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente a Aiven!"
                     )
                     st.rerun()
 
@@ -649,7 +612,7 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO DESPLEGABLE MOSTRANDO RIESGO ASEGURADO REAL
+# LISTADO DESPLEGABLE CON RIESGO ASEGURADO MOSTRADO
 # ---------------------------------------------------------
 if not df.empty:
     for idx, row in df.iterrows():
@@ -663,16 +626,8 @@ if not df.empty:
         prima = float(row["prima"])
         comision_real = float(row["comision"])
         rut = str(row["rut"])
-        email = (
-            ""
-            if str(row["email"]).lower() == "nan"
-            else str(row["email"] or "")
-        )
-        tel = (
-            ""
-            if str(row["telefono"]).lower() == "nan"
-            else str(row["telefono"] or "")
-        )
+        email = clean_str(row["email"], "")
+        tel = clean_str(row["telefono"], "")
 
         venc_raw = row["fecha_vencimiento"]
         try:
@@ -689,7 +644,6 @@ if not df.empty:
         with st.expander(label_tarjeta):
             st.markdown('<div class="edit-box">', unsafe_allow_html=True)
 
-            # Banner Informativo con el Riesgo Asegurado (Suzuki Swift, Ford Edge, Kia Frontier...)
             texto_riesgo = (
                 materia if materia else "Sin riesgo/materia especificada"
             )
@@ -770,10 +724,18 @@ if not df.empty:
 
                         # 2. Actualizar o Insertar Compañía
                         cursor.execute(
-                            "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
+                            "SELECT id_compañia FROM compañias WHERE nombre = %s;",
                             (edit_comp,),
                         )
-                        id_comp_actualizada = cursor.lastrowid
+                        r_co = cursor.fetchone()
+                        if r_co:
+                            id_comp_actualizada = r_co[0]
+                        else:
+                            cursor.execute(
+                                "INSERT INTO compañias (nombre) VALUES (%s);",
+                                (edit_comp,),
+                            )
+                            id_comp_actualizada = cursor.lastrowid
 
                         # 3. Actualizar Póliza
                         cursor.execute(
