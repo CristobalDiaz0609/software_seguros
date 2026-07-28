@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timedelta
 import mysql.connector
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 # 1. Configuración de página
@@ -164,11 +165,9 @@ with col_acc1:
 
         if uploaded_file:
             try:
-                # 1. Leer completo sin encabezado
                 df_raw = pd.read_excel(uploaded_file, header=None)
                 df_raw = df_raw.fillna("")
 
-                # 2. Buscar fila con títulos reales
                 header_idx = None
                 for idx, row in df_raw.iterrows():
                     row_str = " ".join([str(c).lower().strip() for c in row.values])
@@ -183,7 +182,6 @@ with col_acc1:
                 else:
                     df_excel = df_raw.copy()
 
-                # Desduplicar nombres de columnas
                 seen = {}
                 new_cols = []
                 for col in df_excel.columns:
@@ -196,7 +194,6 @@ with col_acc1:
                         new_cols.append(c_str)
                 df_excel.columns = new_cols
 
-                # MAPEO DIRECTO Y DE PRECISIÓN
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
@@ -226,7 +223,6 @@ with col_acc1:
 
                 df_excel = df_excel.rename(columns=col_map)
 
-                # Filtrar filas de subtítulos o totales
                 if "Nombre" in df_excel.columns:
                     df_excel = df_excel[
                         df_excel["Nombre"].astype(str).str.strip().ne("") & 
@@ -504,7 +500,7 @@ except Exception as e:
     df = pd.DataFrame()
 
 # ---------------------------------------------------------
-# TARJETAS MÉTRICAS (CON KPI DE PÓLIZAS)
+# TARJETAS MÉTRICAS (KPIs)
 # ---------------------------------------------------------
 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
 
@@ -526,6 +522,58 @@ with col_m5:
     st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
 
 st.write("")
+
+# ---------------------------------------------------------
+# SECCIÓN DE GRÁFICOS VISUALES Y ANALÍTICA
+# ---------------------------------------------------------
+if not df.empty:
+    with st.expander("📊 Ver Análisis Gráfico de Cartera", expanded=False):
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            st.markdown("##### 🏢 Pólizas por Compañía Aseguradora")
+            df_comp = df.groupby("compañia")["id_poliza"].count().reset_index()
+            df_comp.columns = ["Compañía", "Cantidad"]
+            df_comp = df_comp.sort_values(by="Cantidad", ascending=True)
+
+            fig_comp = px.bar(
+                df_comp,
+                x="Cantidad",
+                y="Compañía",
+                orientation="h",
+                text="Cantidad",
+                color_discrete_sequence=["#2b6cb0"],
+            )
+            fig_comp.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10),
+                height=280,
+                xaxis_title="",
+                yaxis_title="",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+            )
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        with col_g2:
+            st.markdown("##### 🚗 Distribución por Ramo / Tipo de Seguro")
+            df_ramo = df.groupby("ramo")["id_poliza"].count().reset_index()
+            df_ramo.columns = ["Ramo", "Cantidad"]
+
+            fig_ramo = px.pie(
+                df_ramo,
+                values="Cantidad",
+                names="Ramo",
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set3,
+            )
+            fig_ramo.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10),
+                height=280,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+            )
+            st.plotly_chart(fig_ramo, use_container_width=True)
+
 st.write("")
 
 # ---------------------------------------------------------
