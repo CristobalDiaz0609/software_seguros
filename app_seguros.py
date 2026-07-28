@@ -111,7 +111,7 @@ def get_connection():
 
 
 def parse_custom_date(val):
-    if pd.isna(val) or str(val).lower() in ["nan", "none", "null"]:
+    if not val or pd.isna(val) or str(val).lower() in ["nan", "none", "null", ""]:
         return datetime.now().strftime("%Y-%m-%d")
     val_str = str(val).strip()
 
@@ -125,10 +125,13 @@ def parse_custom_date(val):
         return datetime.now().strftime("%Y-%m-%d")
 
 
-def clean_str(val, default=""):
-    if pd.isna(val) or str(val).lower() in ["nan", "none", "null"]:
+def clean_val(val, default=""):
+    if pd.isna(val) or val is None:
         return default
-    return str(val).strip()
+    s = str(val).strip()
+    if s.lower() in ["nan", "none", "null", "<na>"]:
+        return default
+    return s
 
 
 # Encabezado
@@ -143,7 +146,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# MÓDULO DE IMPORTACIÓN DE EXCEL INTELIGENTE
+# MÓDULO DE IMPORTACIÓN DE EXCEL INTELIGENTE Y SEGURO
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -161,42 +164,39 @@ with col_acc1:
 
         if uploaded_file:
             try:
-                # Read entire sheet raw without headers
+                # 1. Leer completo sin encabezado
                 df_raw = pd.read_excel(uploaded_file, header=None)
+                df_raw = df_raw.fillna("")
 
-                # Search row by row for the exact column header row
+                # 2. Buscar fila con títulos reales
                 header_idx = None
                 for idx, row in df_raw.iterrows():
-                    row_cells = [
-                        str(c).lower().strip()
-                        for c in row.values
-                        if pd.notna(c)
-                    ]
-                    row_text = " ".join(row_cells)
-
-                    # Strict match: must contain "riesgo" or "rut asegurado" or "ramo"
-                    if (
-                        "riesgo" in row_text
-                        or "rut asegurado" in row_text
-                        or "ramo" in row_text
-                    ):
+                    row_str = " ".join([str(c).lower().strip() for c in row.values])
+                    if "ramo" in row_str and ("riesgo" in row_str or "asegurado" in row_str or "nombre" in row_str):
                         header_idx = idx
                         break
 
                 if header_idx is not None:
-                    # Set column names from the found header row and drop everything above it
-                    df_excel = df_raw.iloc[header_idx + 1 :].copy()
-                    df_excel.columns = df_raw.iloc[header_idx].values
+                    headers = [str(c).strip() for c in df_raw.iloc[header_idx].values]
+                    df_excel = df_raw.iloc[header_idx + 1:].copy()
+                    df_excel.columns = headers
                 else:
                     df_excel = df_raw.copy()
 
-                # Clean column names
-                df_excel.columns = [
-                    str(c).strip() if pd.notna(c) else f"col_{i}"
-                    for i, c in enumerate(df_excel.columns)
-                ]
+                # Desduplicar nombres de columnas si hubiese repetidas
+                seen = {}
+                new_cols = []
+                for col in df_excel.columns:
+                    c_str = str(col).strip()
+                    if c_str in seen:
+                        seen[c_str] += 1
+                        new_cols.append(f"{c_str}_{seen[c_str]}")
+                    else:
+                        seen[c_str] = 0
+                        new_cols.append(c_str)
+                df_excel.columns = new_cols
 
-                # Exact column mapping from your screenshot
+                # MAPEO DIRECTO Y DE PRECISIÓN
                 col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
@@ -207,57 +207,33 @@ with col_acc1:
                         col_map[col] = "Ramo"
                     elif "rut" in c_clean and "RUT" not in col_map.values():
                         col_map[col] = "RUT"
-                    elif (
-                        "nombre" in c_clean or "asegurado" in c_clean
-                    ) and "Nombre" not in col_map.values():
+                    elif ("nombre" in c_clean or "asegurado" in c_clean) and "Nombre" not in col_map.values():
                         col_map[col] = "Nombre"
-                    elif (
-                        "compañí" in c_clean or "compañi" in c_clean
-                    ) and "Compañia" not in col_map.values():
+                    elif ("compañí" in c_clean or "compañi" in c_clean) and "Compañia" not in col_map.values():
                         col_map[col] = "Compañia"
-                    elif (
-                        "poliza" in c_clean or "póliza" in c_clean
-                    ) and "Poliza" not in col_map.values():
+                    elif ("poliza" in c_clean or "póliza" in c_clean) and "Poliza" not in col_map.values():
                         col_map[col] = "Poliza"
-                    elif (
-                        "venc" in c_clean
-                        or "ren." in c_clean
-                        or "vigencia" in c_clean
-                    ) and "Vencimiento" not in col_map.values():
+                    elif ("venc" in c_clean or "ren." in c_clean or "vigencia" in c_clean) and "Vencimiento" not in col_map.values():
                         col_map[col] = "Vencimiento"
-                    elif (
-                        "prima" in c_clean and "Prima" not in col_map.values()
-                    ):
+                    elif "prima" in c_clean and "Prima" not in col_map.values():
                         col_map[col] = "Prima"
-                    elif (
-                        "comision" in c_clean or "comisi" in c_clean
-                    ) and "Comision" not in col_map.values():
+                    elif ("comision" in c_clean or "comisi" in c_clean) and "Comision" not in col_map.values():
                         col_map[col] = "Comision"
-                    elif (
-                        "telefono" in c_clean or "teléfono" in c_clean
-                    ) and "Telefono" not in col_map.values():
+                    elif ("telefono" in c_clean or "teléfono" in c_clean) and "Telefono" not in col_map.values():
                         col_map[col] = "Telefono"
-                    elif (
-                        "correo" in c_clean or "email" in c_clean
-                    ) and "Email" not in col_map.values():
+                    elif ("correo" in c_clean or "email" in c_clean) and "Email" not in col_map.values():
                         col_map[col] = "Email"
 
                 df_excel = df_excel.rename(columns=col_map)
 
-                # Remove non-data rows
+                # Filtrar filas de subtítulos o totales
                 if "Nombre" in df_excel.columns:
                     df_excel = df_excel[
-                        df_excel["Nombre"].notna()
-                        & ~df_excel["Nombre"]
-                        .astype(str)
-                        .str.contains(
-                            "Ventas|Total|Nombre|Asegurado", case=False, na=False
-                        )
+                        df_excel["Nombre"].astype(str).str.strip().ne("") & 
+                        ~df_excel["Nombre"].astype(str).str.contains("Ventas|Total|Nombre|Asegurado", case=False, na=False)
                     ]
 
-                st.success(
-                    f"📊 **Planilla detectada correctamente:** {len(df_excel)} registros listos para importar."
-                )
+                st.success(f"📊 **Planilla detectada correctamente:** {len(df_excel)} registros listos para importar.")
                 st.dataframe(df_excel.head(10), use_container_width=True)
 
                 if st.button("🚀 Confirmar e Importar Todos a Aiven"):
@@ -273,92 +249,64 @@ with col_acc1:
 
                     registros_procesados = 0
 
-                    for i, r in df_excel.iterrows():
-                        nombre_val = clean_str(
-                            r.get("Nombre"), "CLIENTE SIN NOMBRE"
-                        )
-                        if (
-                            not nombre_val
-                            or nombre_val == "CLIENTE SIN NOMBRE"
-                        ):
+                    for i, (_, r) in enumerate(df_excel.iterrows()):
+                        nombre_val = clean_val(r.get("Nombre"), "CLIENTE SIN NOMBRE")
+                        if not nombre_val or nombre_val == "CLIENTE SIN NOMBRE":
                             continue
 
-                        rut_val = clean_str(
-                            r.get("RUT"), f"SIN-RUT-{i}-{registros_procesados}"
-                        )
-                        tel_val = clean_str(r.get("Telefono"), "")
-                        email_val = clean_str(r.get("Email"), "")
-                        comp_val = clean_str(r.get("Compañia"), "GENERAL")
-                        poliza_val = clean_str(r.get("Poliza"), "S/N")
-                        ramo_val = clean_str(r.get("Ramo"), "General")
-                        materia_val = clean_str(r.get("Materia_Asegurada"), "")
+                        rut_val = clean_val(r.get("RUT"), f"SIN-RUT-{i}-{registros_procesados}")
+                        tel_val = clean_val(r.get("Telefono"), "")
+                        email_val = clean_val(r.get("Email"), "")
+                        comp_val = clean_val(r.get("Compañia"), "GENERAL")
+                        poliza_val = clean_val(r.get("Poliza"), "S/N")
+                        ramo_val = clean_val(r.get("Ramo"), "General")
+                        materia_val = clean_val(r.get("Materia_Asegurada"), "")
 
                         venc_val = parse_custom_date(r.get("Vencimiento"))
 
                         try:
-                            prima_val = float(
-                                str(r.get("Prima", 0))
-                                .replace(",", ".")
-                                .replace("$", "")
-                            )
+                            prima_str = str(r.get("Prima", "0")).replace(",", ".").replace("$", "").strip()
+                            prima_val = float(prima_str) if prima_str else 0.0
                         except (ValueError, TypeError):
                             prima_val = 0.0
 
                         try:
-                            comision_val = float(
-                                str(r.get("Comision", 0))
-                                .replace(",", ".")
-                                .replace("$", "")
-                            )
+                            com_str = str(r.get("Comision", "0")).replace(",", ".").replace("$", "").strip()
+                            comision_val = float(com_str) if com_str else 0.0
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
                         # 1. Insertar / Buscar Cliente
-                        cursor.execute(
-                            "SELECT id_cliente FROM clientes WHERE rut = %s;",
-                            (rut_val,),
-                        )
+                        cursor.execute("SELECT id_cliente FROM clientes WHERE rut = %s;", (rut_val,))
                         row_c = cursor.fetchone()
                         if row_c:
                             id_cliente = row_c[0]
                         else:
                             cursor.execute(
                                 "INSERT INTO clientes (rut, nombre_completo, email, telefono) VALUES (%s, %s, %s, %s);",
-                                (rut_val, nombre_val, email_val, tel_val),
+                                (rut_val, nombre_val, email_val, tel_val)
                             )
                             id_cliente = cursor.lastrowid
 
                         # 2. Insertar / Buscar Compañía
-                        cursor.execute(
-                            "SELECT id_compañia FROM compañias WHERE nombre = %s;",
-                            (comp_val,),
-                        )
+                        cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (comp_val,))
                         row_co = cursor.fetchone()
                         if row_co:
                             id_comp = row_co[0]
                         else:
                             cursor.execute(
                                 "INSERT INTO compañias (nombre) VALUES (%s);",
-                                (comp_val,),
+                                (comp_val,)
                             )
                             id_comp = cursor.lastrowid
 
-                        # 3. Insertar Póliza limpia
+                        # 3. Insertar Póliza de forma completamente sanitizada
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
                             VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s, 'Vencida');
-                        """,
-                            (
-                                poliza_val,
-                                id_cliente,
-                                id_comp,
-                                ramo_val,
-                                materia_val,
-                                venc_val,
-                                prima_val,
-                                comision_val,
-                            ),
+                            """,
+                            (poliza_val, id_cliente, id_comp, ramo_val, materia_val, venc_val, prima_val, comision_val)
                         )
 
                         registros_procesados += 1
@@ -367,9 +315,7 @@ with col_acc1:
                     cursor.close()
                     conn.close()
 
-                    st.success(
-                        f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente!"
-                    )
+                    st.success(f"🎉 ¡Se importaron {registros_procesados} pólizas correctamente!")
                     st.rerun()
 
             except Exception as e:
@@ -389,9 +335,7 @@ with col_acc2:
         )
 
         with st.form("form_nuevo_cliente"):
-            c_nombre = st.text_input(
-                "Nombre Completo del Cliente", placeholder="Ej: Juan Pérez Soto"
-            )
+            c_nombre = st.text_input("Nombre Completo del Cliente", placeholder="Ej: Juan Pérez Soto")
             c_tel = st.text_input("Teléfono de Contacto")
             c_email = st.text_input("Correo Electrónico")
 
@@ -404,26 +348,16 @@ with col_acc2:
             materia_especifica = ""
             if "Auto" in tipo_seguro:
                 patente = st.text_input("Patente", placeholder="AA1234")
-                modelo = st.text_input(
-                    "Modelo / Año", placeholder="Toyota RAV4 2022"
-                )
+                modelo = st.text_input("Modelo / Año", placeholder="Toyota RAV4 2022")
                 materia_especifica = f"Patente: {patente.upper()} - {modelo}"
             elif "Vivienda" in tipo_seguro:
-                direccion_prop = st.text_input(
-                    "Dirección Propiedad",
-                    placeholder="Av. Providencia 1234, Dpto 502",
-                )
+                direccion_prop = st.text_input("Dirección Propiedad", placeholder="Av. Providencia 1234, Dpto 502")
                 materia_especifica = f"Propiedad: {direccion_prop}"
             elif "Salud" in tipo_seguro:
-                cargas = st.text_input(
-                    "Cargas / Beneficiarios",
-                    placeholder="Ej: Cónyuge + 2 Hijos",
-                )
+                cargas = st.text_input("Cargas / Beneficiarios", placeholder="Ej: Cónyuge + 2 Hijos")
                 materia_especifica = f"Cobertura: {cargas}"
             else:
-                materia_especifica = st.text_input(
-                    "Riesgo Asegurado", placeholder="Descripción del bien"
-                )
+                materia_especifica = st.text_input("Riesgo Asegurado", placeholder="Descripción del bien")
 
             btn_guardar = st.form_submit_button("Guardar en Sistema")
 
@@ -506,14 +440,8 @@ try:
 
     hoy = datetime.now()
     primer_dia_mes_actual = hoy.replace(day=1).strftime("%Y-%m-%d")
-    ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime(
-        "%Y-%m-%d"
-    )
-    primer_dia_mes_anterior = (
-        (hoy.replace(day=1) - timedelta(days=1))
-        .replace(day=1)
-        .strftime("%Y-%m-%d")
-    )
+    ultimo_dia_mes_anterior = (hoy.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
+    primer_dia_mes_anterior = ((hoy.replace(day=1) - timedelta(days=1)).replace(day=1)).strftime("%Y-%m-%d")
 
     query_base = """
         SELECT 
@@ -565,9 +493,7 @@ try:
 
     total_comision_mes_actual = float(df_actual["total"].iloc[0])
     total_comision_mes_anterior = float(df_anterior["total"].iloc[0])
-    variacion_comision = (
-        total_comision_mes_actual - total_comision_mes_anterior
-    )
+    variacion_comision = total_comision_mes_actual - total_comision_mes_anterior
 
     if not df.empty:
         total_clientes = df["id_cliente"].nunique()
@@ -579,30 +505,18 @@ except Exception as e:
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 
 with col_m1:
-    st.markdown(
-        f"""<div class="metric-card"><p class="metric-value">{total_clientes}</p><p class="metric-label">CLIENTES</p></div>""",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""<div class="metric-card"><p class="metric-value">{total_clientes}</p><p class="metric-label">CLIENTES</p></div>""", unsafe_allow_html=True)
 
 with col_m2:
-    st.markdown(
-        f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""", unsafe_allow_html=True)
 
 with col_m3:
-    st.markdown(
-        f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""", unsafe_allow_html=True)
 
 with col_m4:
     color_var = "green" if variacion_comision >= 0 else "red"
     signo = "+" if variacion_comision >= 0 else ""
-    st.markdown(
-        f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
 
 st.write("")
 st.write("")
@@ -618,20 +532,16 @@ if not df.empty:
         aseguradora = str(row["compañia"]).upper()
         poliza = str(row["poliza"])
         ramo = str(row["ramo"]).upper()
-        materia = str(row["materia"]).strip()
+        materia = clean_val(row["materia"], "")
         prima = float(row["prima"])
         comision_real = float(row["comision"])
         rut = str(row["rut"])
-        email = clean_str(row["email"], "")
-        tel = clean_str(row["telefono"], "")
+        email = clean_val(row["email"], "")
+        tel = clean_val(row["telefono"], "")
 
         venc_raw = row["fecha_vencimiento"]
         try:
-            venc_date = (
-                pd.to_datetime(venc_raw).date()
-                if pd.notna(venc_raw)
-                else datetime.now().date()
-            )
+            venc_date = pd.to_datetime(venc_raw).date() if pd.notna(venc_raw) else datetime.now().date()
         except Exception:
             venc_date = datetime.now().date()
 
@@ -640,13 +550,8 @@ if not df.empty:
         with st.expander(label_tarjeta):
             st.markdown('<div class="edit-box">', unsafe_allow_html=True)
 
-            texto_riesgo = (
-                materia if materia else "Sin riesgo/materia especificada"
-            )
-            st.markdown(
-                f'<div class="materia-banner">🚗 <b>Riesgo Asegurado:</b> {texto_riesgo}</div>',
-                unsafe_allow_html=True,
-            )
+            texto_riesgo = materia if materia else "Sin riesgo/materia especificada"
+            st.markdown(f'<div class="materia-banner">🚗 <b>Riesgo Asegurado:</b> {texto_riesgo}</div>', unsafe_allow_html=True)
 
             with st.form(key=f"form_edit_{id_poliza}_{idx}"):
                 st.markdown("## ✏️ Editar Información de la Póliza")
@@ -655,47 +560,27 @@ if not df.empty:
                 c1, c2, c3 = st.columns(3)
 
                 with c1:
-                    st.markdown(
-                        '<span class="badge-section badge-blue">👤 Cliente</span>',
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown('<span class="badge-section badge-blue">👤 Cliente</span>', unsafe_allow_html=True)
                     edit_nombre = st.text_input("Nombre Completo", value=nombre)
                     edit_rut = st.text_input("RUT", value=rut)
                     edit_tel = st.text_input("Teléfono", value=tel)
                     edit_email = st.text_input("Email", value=email)
 
                 with c2:
-                    st.markdown(
-                        '<span class="badge-section badge-purple">📜 Póliza & Bien</span>',
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown('<span class="badge-section badge-purple">📜 Póliza & Bien</span>', unsafe_allow_html=True)
                     edit_comp = st.text_input("Aseguradora", value=aseguradora)
                     edit_poliza = st.text_input("N° Póliza", value=poliza)
                     edit_ramo = st.text_input("Ramo / Tipo", value=ramo)
-                    edit_materia = st.text_input(
-                        "Riesgo Asegurado (Marca/Modelo/Patente)",
-                        value=materia,
-                    )
+                    edit_materia = st.text_input("Riesgo Asegurado (Marca/Modelo/Patente)", value=materia)
 
                 with c3:
-                    st.markdown(
-                        '<span class="badge-section badge-green">💰 Finanzas & Fecha</span>',
-                        unsafe_allow_html=True,
-                    )
-                    edit_prima = st.number_input(
-                        "Monto Prima", min_value=0.0, value=prima
-                    )
-                    edit_comision = st.number_input(
-                        "Monto Comisión", min_value=0.0, value=comision_real
-                    )
-                    edit_venc = st.date_input(
-                        "Fecha Vencimiento", value=venc_date
-                    )
+                    st.markdown('<span class="badge-section badge-green">💰 Finanzas & Fecha</span>', unsafe_allow_html=True)
+                    edit_prima = st.number_input("Monto Prima", min_value=0.0, value=prima)
+                    edit_comision = st.number_input("Monto Comisión", min_value=0.0, value=comision_real)
+                    edit_venc = st.date_input("Fecha Vencimiento", value=venc_date)
 
                 st.write("")
-                btn_guardar_cambios = st.form_submit_button(
-                    "💾 Guardar Cambios"
-                )
+                btn_guardar_cambios = st.form_submit_button("💾 Guardar Cambios")
 
                 if btn_guardar_cambios:
                     try:
@@ -708,29 +593,17 @@ if not df.empty:
                             UPDATE clientes 
                             SET nombre_completo = %s, rut = %s, telefono = %s, email = %s 
                             WHERE id_cliente = %s
-                        """,
-                            (
-                                edit_nombre,
-                                edit_rut,
-                                edit_tel,
-                                edit_email,
-                                id_cliente,
-                            ),
+                            """,
+                            (edit_nombre, edit_rut, edit_tel, edit_email, id_cliente)
                         )
 
                         # 2. Actualizar o Insertar Compañía
-                        cursor.execute(
-                            "SELECT id_compañia FROM compañias WHERE nombre = %s;",
-                            (edit_comp,),
-                        )
+                        cursor.execute("SELECT id_compañia FROM compañias WHERE nombre = %s;", (edit_comp,))
                         r_co = cursor.fetchone()
                         if r_co:
                             id_comp_actualizada = r_co[0]
                         else:
-                            cursor.execute(
-                                "INSERT INTO compañias (nombre) VALUES (%s);",
-                                (edit_comp,),
-                            )
+                            cursor.execute("INSERT INTO compañias (nombre) VALUES (%s);", (edit_comp,))
                             id_comp_actualizada = cursor.lastrowid
 
                         # 3. Actualizar Póliza
@@ -740,26 +613,15 @@ if not df.empty:
                             SET numero_poliza = %s, id_compañia = %s, ramo = %s, materia_asegurada = %s, 
                                 monto_prima_anual = %s, monto_comision = %s, fecha_vencimiento = %s 
                             WHERE id_poliza = %s
-                        """,
-                            (
-                                edit_poliza,
-                                id_comp_actualizada,
-                                edit_ramo,
-                                edit_materia,
-                                edit_prima,
-                                edit_comision,
-                                edit_venc,
-                                id_poliza,
-                            ),
+                            """,
+                            (edit_poliza, id_comp_actualizada, edit_ramo, edit_materia, edit_prima, edit_comision, edit_venc, id_poliza)
                         )
 
                         conn.commit()
                         cursor.close()
                         conn.close()
 
-                        st.success(
-                            "¡Información de la póliza actualizada con éxito!"
-                        )
+                        st.success("¡Información de la póliza actualizada con éxito!")
                         st.rerun()
 
                     except Exception as err:
