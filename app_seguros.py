@@ -2,9 +2,9 @@ import mysql.connector
 import pandas as pd
 import streamlit as st
 
-# 1. Configuración de página (Ocultar Sidebar)
+# 1. Configuración de página
 st.set_page_config(
-    page_title="Cartera de Clientes",
+    page_title="Cartera de Clientes & Comisiones",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -14,7 +14,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Ocultar elementos por defecto de Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -24,7 +23,6 @@ st.markdown(
         max-width: 1200px;
     }
 
-    /* Encabezado Oscuro */
     .header-container {
         background-color: #1a3644;
         color: white;
@@ -45,7 +43,7 @@ st.markdown(
         letter-spacing: 1px;
     }
 
-    /* Tarjetas de Resumen */
+    /* Tarjetas de Métricas Métricas Financieras */
     .metric-card {
         background-color: white;
         border: 1px solid #e2e8f0;
@@ -55,10 +53,13 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .metric-value {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 700;
         color: #1a202c;
         margin-bottom: -5px;
+    }
+    .metric-value.green {
+        color: #2f855a;
     }
     .metric-value.red {
         color: #c53030;
@@ -100,8 +101,6 @@ st.markdown(
         color: #2d3748;
         margin: 0;
     }
-
-    /* Etiqueta Vencida */
     .badge-vencida {
         background-color: #c53030;
         color: white;
@@ -161,9 +160,53 @@ with col_f5:
 st.write("")
 
 # ---------------------------------------------------------
-# TARJETAS DE MÉTRICAS (Clientes dejado en blanco)
+# CONSULTA A LA BD & CÁLCULO DE COMISIONES
 # ---------------------------------------------------------
-col_m1, col_m2, col_m3 = st.columns(3)
+total_comision_cartera = 0.0
+total_comision_vencida = 0.0
+pólizas_vencidas_cnt = 0
+
+try:
+    conn = get_connection()
+    # Consulta trayendo primas y estado
+    query = """
+        SELECT 
+            c.nombre_completo,
+            COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia,
+            COALESCE(p.numero_poliza, '—') as poliza,
+            COALESCE(p.monto_prima_anual, 0) as prima,
+            COALESCE(p.moneda, 'UF') as moneda,
+            p.estado,
+            p.fecha_vencimiento
+        FROM clientes c
+        LEFT JOIN polizas p ON c.id_cliente = p.id_cliente
+        LEFT JOIN compañias co ON p.id_compañia = co.id_compañia;
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    if not df.empty:
+        # Porcentaje promedio de comisión por defecto (12% si no está definido individualmente)
+        PORCENTAJE_COMISION = 0.12
+
+        # Asumimos que la comisión estimada es el 12% de la prima
+        df["comision"] = df["prima"] * PORCENTAJE_COMISION
+
+        total_comision_cartera = df["comision"].sum()
+
+        # Filtrar comisión en riesgo (Vencidas)
+        df_vencidas = df[df["estado"] == "Vencida"]
+        total_comision_vencida = df_vencidas["comision"].sum()
+        pólizas_vencidas_cnt = len(df_vencidas)
+
+except Exception as e:
+    df = pd.DataFrame()
+
+# ---------------------------------------------------------
+# TARJETAS DE MÉTRICAS (FINANCIERAS & COMISIONES)
+# ---------------------------------------------------------
+col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+
 with col_m1:
     st.markdown(
         """
@@ -174,22 +217,35 @@ with col_m1:
         """,
         unsafe_allow_html=True,
     )
+
 with col_m2:
     st.markdown(
-        """
+        f"""
         <div class="metric-card">
-            <p class="metric-value red">0</p>
-            <p class="metric-label">VENCIDAS</p>
+            <p class="metric-value green">${total_comision_cartera:,.2f}</p>
+            <p class="metric-label">COMISIÓN CARTERA (EST.)</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
 with col_m3:
     st.markdown(
-        """
+        f"""
         <div class="metric-card">
-            <p class="metric-value">0</p>
-            <p class="metric-label">URGENTES ≤15D</p>
+            <p class="metric-value red">${total_comision_vencida:,.2f}</p>
+            <p class="metric-label">COMISIÓN EN RIESGO</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with col_m4:
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <p class="metric-value red">{pólizas_vencidas_cnt}</p>
+            <p class="metric-label">PÓLIZAS VENCIDAS</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -199,47 +255,29 @@ st.write("")
 st.write("")
 
 # ---------------------------------------------------------
-# LISTADO
+# RENDERIZADO DE LAS TARJETAS DE CLIENTE
 # ---------------------------------------------------------
-try:
-    conn = get_connection()
-    query = """
-        SELECT 
-            c.nombre_completo,
-            COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia,
-            COALESCE(p.numero_poliza, '—') as poliza,
-            COALESCE(p.monto_prima_anual, 0) as prima,
-            p.fecha_vencimiento
-        FROM clientes c
-        LEFT JOIN polizas p ON c.id_cliente = p.id_cliente
-        LEFT JOIN compañias co ON p.id_compañia = co.id_compañia
-        ORDER BY p.fecha_vencimiento ASC;
-    """
-    df = pd.read_sql(query, conn)
-    conn.close()
+if not df.empty:
+    for idx, row in df.iterrows():
+        nombre = str(row["nombre_completo"]).upper()
+        aseguradora = str(row["compañia"]).upper()
+        poliza = str(row["poliza"])
+        prima = row["prima"]
+        comision_item = row.get("comision", prima * 0.12)
+        moneda = row["moneda"]
 
-    if df.empty:
-        st.info("No hay información registrada en la base de datos.")
-    else:
-        for idx, row in df.iterrows():
-            nombre = str(row["nombre_completo"]).upper()
-            aseguradora = str(row["compañia"]).upper()
-            poliza = str(row["poliza"])
-            prima = row["prima"]
-
-            html_card = f"""
-            <div class="client-card">
-                <div>
-                    <p class="client-name">{nombre}</p>
-                    <p class="client-details">{aseguradora} · {poliza}</p>
-                    <p class="client-price">${prima} / prima</p>
-                </div>
-                <div>
-                    <span class="badge-vencida">Vencida</span>
-                </div>
+        html_card = f"""
+        <div class="client-card">
+            <div>
+                <p class="client-name">{nombre}</p>
+                <p class="client-details">{aseguradora} · {poliza}</p>
+                <p class="client-price">${prima:,.2f} {moneda} / prima <span style="color:#2f855a; font-size:12px; margin-left:10px;">(Comisión: ${comision_item:,.2f})</span></p>
             </div>
-            """
-            st.markdown(html_card, unsafe_allow_html=True)
-
-except Exception as e:
-    st.info("Conexión lista. Listo para empezar a cargar y visualizar pólizas.")
+            <div>
+                <span class="badge-vencida">Vencida</span>
+            </div>
+        </div>
+        """
+        st.markdown(html_card, unsafe_allow_html=True)
+else:
+    st.info("Sin registros para mostrar. Los datos se actualizarán al conectar.")
