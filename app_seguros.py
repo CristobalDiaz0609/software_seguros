@@ -44,10 +44,10 @@ st.markdown(
         text-align: left;
         box-shadow: 0 2px 5px rgba(0,0,0,0.03);
     }
-    .metric-value { font-size: 26px; font-weight: 800; color: #1a202c; margin-bottom: -5px; }
+    .metric-value { font-size: 24px; font-weight: 800; color: #1a202c; margin-bottom: -5px; }
     .metric-value.green { color: #276749; }
     .metric-value.red { color: #9b2c2c; }
-    .metric-label { font-size: 11px; color: #718096; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
+    .metric-label { font-size: 10px; color: #718096; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
 
     .edit-box {
         background-color: #f8fafc;
@@ -183,7 +183,7 @@ with col_acc1:
                 else:
                     df_excel = df_raw.copy()
 
-                # Desduplicar nombres de columnas si hubiese repetidas
+                # Desduplicar nombres de columnas
                 seen = {}
                 new_cols = []
                 for col in df_excel.columns:
@@ -300,7 +300,7 @@ with col_acc1:
                             )
                             id_comp = cursor.lastrowid
 
-                        # 3. Insertar Póliza de forma completamente sanitizada
+                        # 3. Insertar Póliza limpia
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, materia_asegurada, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
@@ -431,6 +431,7 @@ st.write("")
 # CÁLCULOS Y CONSULTA
 # ---------------------------------------------------------
 total_clientes = 0
+total_polizas = 0
 total_comision_mes_actual = 0.0
 total_comision_mes_anterior = 0.0
 variacion_comision = 0.0
@@ -497,23 +498,29 @@ try:
 
     if not df.empty:
         total_clientes = df["id_cliente"].nunique()
+        total_polizas = len(df)
 
 except Exception as e:
     df = pd.DataFrame()
 
-# Tarjetas Métricas
-col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+# ---------------------------------------------------------
+# TARJETAS MÉTRICAS (CON KPI DE PÓLIZAS)
+# ---------------------------------------------------------
+col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
 
 with col_m1:
     st.markdown(f"""<div class="metric-card"><p class="metric-value">{total_clientes}</p><p class="metric-label">CLIENTES</p></div>""", unsafe_allow_html=True)
 
 with col_m2:
-    st.markdown(f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="metric-card"><p class="metric-value" style="color:#2b6cb0;">{total_polizas}</p><p class="metric-label">TOTAL PÓLIZAS</p></div>""", unsafe_allow_html=True)
 
 with col_m3:
-    st.markdown(f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="metric-card"><p class="metric-value green">${total_comision_mes_actual:,.2f}</p><p class="metric-label">COMISIÓN ESTE MES</p></div>""", unsafe_allow_html=True)
 
 with col_m4:
+    st.markdown(f"""<div class="metric-card"><p class="metric-value">${total_comision_mes_anterior:,.2f}</p><p class="metric-label">COMISIÓN MES ANTERIOR</p></div>""", unsafe_allow_html=True)
+
+with col_m5:
     color_var = "green" if variacion_comision >= 0 else "red"
     signo = "+" if variacion_comision >= 0 else ""
     st.markdown(f"""<div class="metric-card"><p class="metric-value {color_var}">{signo}${variacion_comision:,.2f}</p><p class="metric-label">DIFERENCIA MENSUAL</p></div>""", unsafe_allow_html=True)
