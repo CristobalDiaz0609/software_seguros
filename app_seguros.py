@@ -64,6 +64,7 @@ st.markdown(
     .client-details { font-size: 13px; color: #718096; margin: 0 0 6px 0; }
     .client-price { font-size: 13px; font-weight: 600; color: #2d3748; margin: 0; }
     .badge-vencida { background-color: #c53030; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge-vigente { background-color: #2f855a; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -122,7 +123,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# IMPORTADOR DE EXCEL ROBUSTO (Con manejo de duplicados de RUT)
+# IMPORTADOR DE EXCEL ROBUSTO
 # ---------------------------------------------------------
 col_acc1, col_acc2 = st.columns([1, 1])
 
@@ -221,12 +222,9 @@ with col_acc1:
                         )
                     ]
 
-                total_filas = len(df_excel)
-
                 st.success(
-                    f"📊 **Planilla lista:** Se detectaron **{total_filas} registros** válidos para importar."
+                    f"📊 **Planilla lista:** Se detectaron **{len(df_excel)} registros** válidos para importar."
                 )
-
                 st.dataframe(df_excel.head(10), use_container_width=True)
 
                 if st.button("🚀 Confirmar e Importar Todos a Aiven"):
@@ -273,7 +271,6 @@ with col_acc1:
                         except (ValueError, TypeError):
                             comision_val = 0.0
 
-                        # 1. Insertar Cliente o buscar su ID si ya existe por RUT o Nombre
                         if rut_val != "SIN RUT" and rut_val != "nan":
                             cursor.execute(
                                 """
@@ -298,14 +295,12 @@ with col_acc1:
                             )
                             id_cliente = cursor.lastrowid
 
-                        # 2. Insertar Compañía
                         cursor.execute(
                             "INSERT INTO compañias (nombre) VALUES (%s) ON DUPLICATE KEY UPDATE id_compañia=LAST_INSERT_ID(id_compañia);",
                             (comp_val,),
                         )
                         id_comp = cursor.lastrowid
 
-                        # 3. Insertar Póliza (Ignorar o actualizar si la póliza está duplicada)
                         cursor.execute(
                             """
                             INSERT INTO polizas (numero_poliza, id_cliente, id_compañia, ramo, fecha_inicio, fecha_vencimiento, monto_prima_anual, monto_comision, estado)
@@ -441,24 +436,28 @@ busqueda = st.text_input(
     label_visibility="collapsed",
 )
 
-# Filtros Pills
-col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns([1, 1.2, 1.5, 1.5, 1])
-with col_f1:
-    st.button("Todos", use_container_width=True)
-with col_f2:
-    st.button("Vencidas", use_container_width=True)
-with col_f3:
-    st.button("Vence ≤15 días", use_container_width=True)
-with col_f4:
-    st.button("Vence ≤30 días", use_container_width=True)
-with col_f5:
-    st.button("Al día", use_container_width=True)
+# ---------------------------------------------------------
+# FILTROS ACTIVOS (Interaccion de botones)
+# ---------------------------------------------------------
+filtro_seleccionado = st.pills(
+    "Filtrar por estado",
+    [
+        "Todos",
+        "Vencidas",
+        "Vence ≤15 días",
+        "Vence ≤30 días",
+        "Al día / Vigente",
+    ],
+    default="Todos",
+    label_visibility="collapsed",
+)
 
 st.write("")
 
 # ---------------------------------------------------------
 # CÁLCULOS Y LISTADO DE CLIENTES
 # ---------------------------------------------------------
+total_clientes = 0
 total_comision_mes_actual = 0.0
 total_comision_mes_anterior = 0.0
 variacion_comision = 0.0
@@ -479,6 +478,7 @@ try:
 
     query_base = """
         SELECT 
+            c.id_cliente,
             c.nombre_completo,
             COALESCE(co.nombre, 'SIN COMPAÑÍA') as compañia,
             COALESCE(p.numero_poliza, '—') as poliza,
@@ -492,10 +492,23 @@ try:
         FROM clientes c
         LEFT JOIN polizas p ON c.id_cliente = p.id_cliente
         LEFT JOIN compañias co ON p.id_compañia = co.id_compañia
+        WHERE 1=1
     """
 
     if busqueda:
-        query_base += f" WHERE c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%' OR p.materia_asegurada LIKE '%{busqueda}%'"
+        query_base += f" AND (c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%' OR p.materia_asegurada LIKE '%{busqueda}%')"
+
+    # Lógica de Filtros por Estado/Fecha
+    if filtro_seleccionado == "Vencidas":
+        query_base += f" AND (p.fecha_vencimiento < '{hoy.strftime('%Y-%m-%d')}' OR p.estado = 'Vencida')"
+    elif filtro_seleccionado == "Vence ≤15 días":
+        fecha_15 = (hoy + timedelta(days=15)).strftime("%Y-%m-%d")
+        query_base += f" AND p.fecha_vencimiento BETWEEN '{hoy.strftime('%Y-%m-%d')}' AND '{fecha_15}'"
+    elif filtro_seleccionado == "Vence ≤30 días":
+        fecha_30 = (hoy + timedelta(days=30)).strftime("%Y-%m-%d")
+        query_base += f" AND p.fecha_vencimiento BETWEEN '{hoy.strftime('%Y-%m-%d')}' AND '{fecha_30}'"
+    elif filtro_seleccionado == "Al día / Vigente":
+        query_base += f" AND p.fecha_vencimiento >= '{hoy.strftime('%Y-%m-%d')}'"
 
     query_base += " ORDER BY p.fecha_vencimiento ASC;"
 
@@ -514,6 +527,10 @@ try:
         total_comision_mes_actual - total_comision_mes_anterior
     )
 
+    if not df.empty:
+        # Calcular el número total de clientes únicos
+        total_clientes = df["id_cliente"].nunique()
+
 except Exception as e:
     df = pd.DataFrame()
 
@@ -522,7 +539,7 @@ col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 
 with col_m1:
     st.markdown(
-        """<div class="metric-card"><p class="metric-value">—</p><p class="metric-label">CLIENTES</p></div>""",
+        f"""<div class="metric-card"><p class="metric-value">{total_clientes}</p><p class="metric-label">CLIENTES</p></div>""",
         unsafe_allow_html=True,
     )
 
@@ -560,7 +577,20 @@ if not df.empty:
         prima = row["prima"]
         comision_real = row["comision"]
         moneda = row["moneda"]
+        venc = row["fecha_vencimiento"]
 
+        # Determinar si está vencida o al día
+        es_vencida = True
+        if venc and pd.notna(venc):
+            es_vencida = pd.to_datetime(venc) < pd.to_datetime(
+                datetime.now().date()
+            )
+
+        badge_html = (
+            '<span class="badge-vencida">Vencida</span>'
+            if es_vencida
+            else '<span class="badge-vigente">Al día</span>'
+        )
         detalle_materia = f" ({materia})" if materia else ""
 
         html_card = f"""
@@ -571,12 +601,12 @@ if not df.empty:
                 <p class="client-price">${prima:,.2f} {moneda} / prima <span style="color:#2f855a; font-size:12px; margin-left:10px;">(Comisión: ${comision_real:,.2f})</span></p>
             </div>
             <div>
-                <span class="badge-vencida">Vencida</span>
+                {badge_html}
             </div>
         </div>
         """
         st.markdown(html_card, unsafe_allow_html=True)
 else:
     st.info(
-        "No hay registros. Sube una planilla Excel o ingresa un cliente a mano para comenzar."
+        "No hay registros que coincidan con el filtro seleccionado. Prueba cambiando la selección arriba."
     )
