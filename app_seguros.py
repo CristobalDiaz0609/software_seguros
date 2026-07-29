@@ -126,7 +126,6 @@ st.markdown(
         box-shadow: 0 4px 12px rgba(47, 133, 90, 0.4) !important;
     }
     
-    /* Pestañas / Hojas */
     .stTabs [data-baseweb="tab-list"] { gap: 15px; }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
@@ -225,6 +224,7 @@ with col_acc1:
             try:
                 df_raw = pd.read_excel(uploaded_file, header=None).fillna("")
 
+                # 1. Buscar fila real de cabeceras
                 header_idx = None
                 for idx, row in df_raw.iterrows():
                     row_str = " ".join([str(c).lower().strip() for c in row.values])
@@ -233,52 +233,71 @@ with col_acc1:
                         break
 
                 if header_idx is not None:
-                    headers = [str(c).strip() for c in df_raw.iloc[header_idx].values]
+                    raw_headers = [str(c).strip() for c in df_raw.iloc[header_idx].values]
                     df_excel = df_raw.iloc[header_idx + 1:].copy()
-                    df_excel.columns = headers
+                    df_excel.columns = raw_headers
                 else:
                     df_excel = df_raw.copy()
 
-                seen = {}
-                new_cols = []
-                for col in df_excel.columns:
-                    c_str = str(col).strip()
-                    if c_str in seen:
-                        seen[c_str] += 1
-                        new_cols.append(f"{c_str}_{seen[c_str]}")
-                    else:
-                        seen[c_str] = 0
-                        new_cols.append(c_str)
-                df_excel.columns = new_cols
+                # 2. Mapeo de columnas por coincidencia
+                mapped_cols = []
+                assigned = set()
 
-                col_map = {}
                 for col in df_excel.columns:
                     c_clean = str(col).lower().strip()
-                    if "riesgo" in c_clean:
-                        col_map[col] = "Materia_Asegurada"
+                    
+                    if "riesgo" in c_clean or "materia" in c_clean:
+                        mapped_cols.append("Materia_Asegurada")
                     elif "ramo" in c_clean:
-                        col_map[col] = "Ramo"
-                    elif "rut" in c_clean and "RUT" not in col_map.values():
-                        col_map[col] = "RUT"
-                    elif ("nombre" in c_clean or "asegurado" in c_clean) and "Nombre" not in col_map.values():
-                        col_map[col] = "Nombre"
-                    elif ("compañí" in c_clean or "compañi" in c_clean) and "Compañia" not in col_map.values():
-                        col_map[col] = "Compañia"
-                    elif ("poliza" in c_clean or "póliza" in c_clean) and "Poliza" not in col_map.values():
-                        col_map[col] = "Poliza"
-                    elif ("venc" in c_clean or "ren." in c_clean or "vigencia" in c_clean) and "Vencimiento" not in col_map.values():
-                        col_map[col] = "Vencimiento"
-                    elif "prima" in c_clean and "Prima" not in col_map.values():
-                        col_map[col] = "Prima"
-                    elif ("comision" in c_clean or "comisi" in c_clean) and "Comision" not in col_map.values():
-                        col_map[col] = "Comision"
-                    elif ("telefono" in c_clean or "teléfono" in c_clean) and "Telefono" not in col_map.values():
-                        col_map[col] = "Telefono"
-                    elif ("correo" in c_clean or "email" in c_clean) and "Email" not in col_map.values():
-                        col_map[col] = "Email"
+                        mapped_cols.append("Ramo")
+                    elif "rut" in c_clean and "RUT" not in assigned:
+                        mapped_cols.append("RUT")
+                        assigned.add("RUT")
+                    elif ("nombre" in c_clean or "asegurado" in c_clean) and "Nombre" not in assigned:
+                        mapped_cols.append("Nombre")
+                        assigned.add("Nombre")
+                    elif ("compañí" in c_clean or "compañi" in c_clean or "aseguradora" in c_clean) and "Compañia" not in assigned:
+                        mapped_cols.append("Compañia")
+                        assigned.add("Compañia")
+                    elif ("poliza" in c_clean or "póliza" in c_clean) and "Poliza" not in assigned:
+                        mapped_cols.append("Poliza")
+                        assigned.add("Poliza")
+                    elif ("venc" in c_clean or "ren." in c_clean or "vigencia" in c_clean) and "Vencimiento" not in assigned:
+                        mapped_cols.append("Vencimiento")
+                        assigned.add("Vencimiento")
+                    elif "prima" in c_clean and "Prima" not in assigned:
+                        mapped_cols.append("Prima")
+                        assigned.add("Prima")
+                    elif ("comision" in c_clean or "comisi" in c_clean) and "Comision" not in assigned:
+                        mapped_cols.append("Comision")
+                        assigned.add("Comision")
+                    elif ("telefono" in c_clean or "teléfono" in c_clean or "celular" in c_clean) and "Telefono" not in assigned:
+                        mapped_cols.append("Telefono")
+                        assigned.add("Telefono")
+                    elif ("correo" in c_clean or "email" in c_clean) and "Email" not in assigned:
+                        mapped_cols.append("Email")
+                        assigned.add("Email")
+                    else:
+                        mapped_cols.append(str(col).strip())
 
-                df_excel = df_excel.rename(columns=col_map)
+                df_excel.columns = mapped_cols
 
+                # 3. DESDUPLICAR NOMBRES DE COLUMNAS (Para evitar el error de Pandas)
+                seen = {}
+                final_cols = []
+                for col in df_excel.columns:
+                    c_str = str(col).strip()
+                    if not c_str:
+                        c_str = "Columna_Vacia"
+                    if c_str in seen:
+                        seen[c_str] += 1
+                        final_cols.append(f"{c_str}_{seen[c_str]}")
+                    else:
+                        seen[c_str] = 0
+                        final_cols.append(c_str)
+                df_excel.columns = final_cols
+
+                # 4. Filtrar filas de encabezados o vacías
                 if "Nombre" in df_excel.columns:
                     df_excel = df_excel[
                         df_excel["Nombre"].astype(str).str.strip().ne("") & 
@@ -514,7 +533,7 @@ with tab_kpis:
 
 
 # ---------------------------------------------------------
-# HOJA 2: BÚSQUEDA Y GESTIÓN DE CARTERA (FILTROS DE FECHA RIGUROSOS)
+# HOJA 2: BÚSQUEDA Y GESTIÓN DE CARTERA
 # ---------------------------------------------------------
 with tab_search:
     st.markdown("### 🔍 Módulo de Búsqueda y Gestión Directa")
@@ -573,7 +592,6 @@ with tab_search:
         if busqueda:
             query_base += f" AND (c.nombre_completo LIKE '%{busqueda}%' OR co.nombre LIKE '%{busqueda}%' OR p.numero_poliza LIKE '%{busqueda}%' OR p.materia_asegurada LIKE '%{busqueda}%')"
 
-        # FILTROS ESTRICTOS BASADOS 100% EN LA FECHA DE VENCIMIENTO REAL
         if filtro_seleccionado == "Vencidas":
             query_base += f" AND p.fecha_vencimiento < '{hoy_str}'"
         elif filtro_seleccionado == "Vence ≤15 días":
